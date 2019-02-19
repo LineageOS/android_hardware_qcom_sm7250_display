@@ -38,7 +38,6 @@
 #include <drm/sde_drm.h>
 
 #include <cstring>
-#include <map>
 #include <sstream>
 #include <string>
 #include <tuple>
@@ -52,9 +51,7 @@
 
 namespace sde_drm {
 
-using std::map;
 using std::string;
-using std::map;
 using std::pair;
 using std::vector;
 using std::unique_ptr;
@@ -276,7 +273,7 @@ void DRMPlaneManager::Init() {
     drmModePlane *libdrm_plane = drmModeGetPlane(fd_, resource->planes[i]);
     if (libdrm_plane) {
       plane->InitAndParse(libdrm_plane);
-      plane_pool_[resource->planes[i]] = std::move(plane);
+      object_pool_[resource->planes[i]] = std::move(plane);
     } else {
       DRM_LOGE("Critical error: drmModeGetPlane() failed for plane %d.", resource->planes[i]);
     }
@@ -285,25 +282,21 @@ void DRMPlaneManager::Init() {
   drmModeFreePlaneResources(resource);
 }
 
-void DRMPlaneManager::DumpByID(uint32_t id) {
-  plane_pool_.at(id)->Dump();
-}
-
 void DRMPlaneManager::Perform(DRMOps code, uint32_t obj_id, drmModeAtomicReq *req, va_list args) {
-  auto it = plane_pool_.find(obj_id);
-  if (it == plane_pool_.end()) {
+  auto plane = GetObject(obj_id);
+  if (plane == nullptr) {
     DRM_LOGE("Invalid plane id %d", obj_id);
     return;
   }
 
   if (code == DRMOps::PLANE_SET_SCALER_CONFIG) {
-    if (it->second->ConfigureScalerLUT(req, dir_lut_blob_id_, cir_lut_blob_id_,
+    if (plane->ConfigureScalerLUT(dir_lut_blob_id_, cir_lut_blob_id_,
                                        sep_lut_blob_id_)) {
       DRM_LOGD("Plane %d: Configuring scaler LUTs", obj_id);
     }
   }
 
-  it->second->Perform(code, req, args);
+  plane->Perform(code, req, args);
 }
 
 void DRMPlaneManager::Perform(DRMOps code, drmModeAtomicReq *req, uint32_t obj_id, ...) {
@@ -314,14 +307,8 @@ void DRMPlaneManager::Perform(DRMOps code, drmModeAtomicReq *req, uint32_t obj_i
   va_end(args);
 }
 
-void DRMPlaneManager::DumpAll() {
-  for (uint32_t i = 0; i < plane_pool_.size(); i++) {
-    plane_pool_[i]->Dump();
-  }
-}
-
 void DRMPlaneManager::GetPlanesInfo(DRMPlanesInfo *info) {
-  for (auto &plane : plane_pool_) {
+  for (auto &plane : object_pool_) {
     info->push_back(std::make_pair(plane.first, plane.second->GetPlaneTypeInfo()));
   }
 }
@@ -330,7 +317,7 @@ void DRMPlaneManager::UnsetUnusedResources(uint32_t crtc_id, bool is_commit, drm
   // Unset planes that were assigned to the crtc referred to by crtc_id but are not requested
   // in this round
   lock_guard<mutex> lock(lock_);
-  for (auto &plane : plane_pool_) {
+  for (auto &plane : object_pool_) {
     uint32_t assigned_crtc = 0;
     uint32_t requested_crtc = 0;
     plane.second->GetAssignedCrtc(&assigned_crtc);
@@ -345,7 +332,7 @@ void DRMPlaneManager::UnsetUnusedResources(uint32_t crtc_id, bool is_commit, drm
 }
 
 void DRMPlaneManager::RetainPlanes(uint32_t crtc_id) {
-  for (auto &plane : plane_pool_) {
+  for (auto &plane : object_pool_) {
     uint32_t assigned_crtc = 0;
     plane.second->GetAssignedCrtc(&assigned_crtc);
     if (assigned_crtc == crtc_id) {
@@ -357,17 +344,17 @@ void DRMPlaneManager::RetainPlanes(uint32_t crtc_id) {
   }
 }
 
-void DRMPlaneManager::PostValidate(uint32_t crtc_id, bool success) {
+void DRMPlaneManager::PostValidate(uint32_t crtc_id) {
   lock_guard<mutex> lock(lock_);
-  for (auto &plane : plane_pool_) {
-    plane.second->PostValidate(crtc_id, success);
+  for (auto &plane : object_pool_) {
+    plane.second->PostValidate(crtc_id);
   }
 }
 
 void DRMPlaneManager::PostCommit(uint32_t crtc_id, bool success) {
   lock_guard<mutex> lock(lock_);
   DRM_LOGD("crtc %d", crtc_id);
-  for (auto &plane : plane_pool_) {
+  for (auto &plane : object_pool_) {
     plane.second->PostCommit(crtc_id, success);
   }
 }
@@ -407,7 +394,8 @@ void DRMPlaneManager::UnsetScalerLUT() {
 #undef __CLASS__
 #define __CLASS__ "DRMPlane"
 
-DRMPlane::DRMPlane(int fd, uint32_t priority) : fd_(fd), priority_(priority) {}
+DRMPlane::DRMPlane(int fd, uint32_t priority)
+    : DRMObject(prop_mgr_), fd_(fd), priority_(priority) {}
 
 DRMPlane::~DRMPlane() {
   drmModeFreePlane(drm_plane_);
@@ -625,44 +613,37 @@ void DRMPlane::InitAndParse(drmModePlane *plane) {
   pp_mgr_->Init(prop_mgr_, DRM_MODE_OBJECT_PLANE);
 }
 
-bool DRMPlane::ConfigureScalerLUT(drmModeAtomicReq *req, uint32_t dir_lut_blob_id,
+bool DRMPlane::ConfigureScalerLUT(uint32_t dir_lut_blob_id,
                                   uint32_t cir_lut_blob_id, uint32_t sep_lut_blob_id) {
   if (plane_type_info_.type != DRMPlaneType::VIG || is_lut_configured_) {
     return false;
   }
 
   if (dir_lut_blob_id) {
-    AddProperty(req, drm_plane_->plane_id,
-                prop_mgr_.GetPropertyId(DRMProperty::LUT_ED),
-                dir_lut_blob_id, false /* cache */, tmp_prop_val_map_);
+    AddProperty(DRMProperty::LUT_ED, dir_lut_blob_id, true);
   }
   if (cir_lut_blob_id) {
-    AddProperty(req, drm_plane_->plane_id,
-                prop_mgr_.GetPropertyId(DRMProperty::LUT_CIR),
-                cir_lut_blob_id, false /* cache */, tmp_prop_val_map_);
+    AddProperty(DRMProperty::LUT_CIR, cir_lut_blob_id, true);
   }
   if (sep_lut_blob_id) {
-    AddProperty(req, drm_plane_->plane_id,
-                prop_mgr_.GetPropertyId(DRMProperty::LUT_SEP),
-                sep_lut_blob_id, false /* cache */, tmp_prop_val_map_);
+    AddProperty(DRMProperty::LUT_SEP, sep_lut_blob_id, true);
   }
 
   return true;
 }
 
-void DRMPlane::SetExclRect(drmModeAtomicReq *req, DRMRect rect) {
-  auto prop_id = prop_mgr_.GetPropertyId(DRMProperty::EXCL_RECT);
+void DRMPlane::SetExclRect(DRMRect rect) {
   drm_clip_rect clip_rect;
   SetRect(rect, &clip_rect);
   excl_rect_copy_ = clip_rect;
-  AddProperty(req, drm_plane_->plane_id, prop_id, reinterpret_cast<uint64_t>
-              (&excl_rect_copy_), false /* cache */, tmp_prop_val_map_);
+  AddProperty(DRMProperty::EXCL_RECT,
+              reinterpret_cast<uint64_t>(&excl_rect_copy_), true);
   DRM_LOGD("Plane %d: Setting exclusion rect [x,y,w,h][%d,%d,%d,%d]", drm_plane_->plane_id,
            clip_rect.x1, clip_rect.y1, (clip_rect.x2 - clip_rect.x1),
            (clip_rect.y2 - clip_rect.y1));
 }
 
-bool DRMPlane::SetCscConfig(drmModeAtomicReq *req, DRMCscType csc_type) {
+bool DRMPlane::SetCscConfig(DRMCscType csc_type) {
   if (plane_type_info_.type != DRMPlaneType::VIG) {
     return false;
   }
@@ -675,26 +656,23 @@ bool DRMPlane::SetCscConfig(drmModeAtomicReq *req, DRMCscType csc_type) {
     return false;
   }
 
-  auto prop_id = prop_mgr_.GetPropertyId(DRMProperty::CSC_V1);
   if (csc_type == kCscTypeMax) {
-    AddProperty(req, drm_plane_->plane_id, prop_id, 0, false /* cache */, tmp_prop_val_map_);
+    AddProperty(DRMProperty::CSC_V1, 0);
   } else {
     csc_config_copy_ = csc_10bit_convert[csc_type];
-    AddProperty(req, drm_plane_->plane_id, prop_id,
-                reinterpret_cast<uint64_t>(&csc_config_copy_), false /* cache */,
-                tmp_prop_val_map_);
+    AddProperty(DRMProperty::CSC_V1,
+                reinterpret_cast<uint64_t>(&csc_config_copy_), true);
   }
 
   return true;
 }
 
-bool DRMPlane::SetScalerConfig(drmModeAtomicReq *req, uint64_t handle) {
+bool DRMPlane::SetScalerConfig(uint64_t handle) {
   if (plane_type_info_.type != DRMPlaneType::VIG) {
     return false;
   }
 
   if (prop_mgr_.IsPropertyAvailable(DRMProperty::SCALER_V2)) {
-    auto prop_id = prop_mgr_.GetPropertyId(DRMProperty::SCALER_V2);
     sde_drm_scaler_v2 *scaler_v2_config = reinterpret_cast<sde_drm_scaler_v2 *>(handle);
     uint64_t scaler_data = 0;
     // The address needs to be valid even after async commit, since we are sending address to
@@ -704,15 +682,14 @@ bool DRMPlane::SetScalerConfig(drmModeAtomicReq *req, uint64_t handle) {
     if (scaler_v2_config_copy_.enable) {
       scaler_data = reinterpret_cast<uint64_t>(&scaler_v2_config_copy_);
     }
-    AddProperty(req, drm_plane_->plane_id, prop_id, scaler_data, false /* cache */,
-                tmp_prop_val_map_);
+    AddProperty(DRMProperty::SCALER_V2, scaler_data, scaler_data != 0);
     return true;
   }
 
   return false;
 }
 
-void DRMPlane::SetDecimation(drmModeAtomicReq *req, uint32_t prop_id, uint32_t prop_value) {
+void DRMPlane::SetDecimation(DRMProperty prop, uint32_t prop_value) {
   if (plane_type_info_.type == DRMPlaneType::DMA || plane_type_info_.master_plane_id) {
     // if value is 0, client is just trying to clear previous decimation, so bail out silently
     if (prop_value > 0) {
@@ -724,14 +701,14 @@ void DRMPlane::SetDecimation(drmModeAtomicReq *req, uint32_t prop_id, uint32_t p
 
   // TODO(user): Currently a ViG plane in smart DMA mode could receive a non-zero decimation value
   // but there is no good way to catch. In any case fix will be in client
-  AddProperty(req, drm_plane_->plane_id, prop_id, prop_value, true /* cache */, tmp_prop_val_map_);
+  AddProperty(prop, prop_value);
   DRM_LOGD("Plane %d: Setting decimation %d", drm_plane_->plane_id, prop_value);
 }
 
-void DRMPlane::PostValidate(uint32_t crtc_id, bool /*success*/) {
+void DRMPlane::PostValidate(uint32_t crtc_id) {
+  DiscardDirtyProperties();
   if (requested_crtc_id_ == crtc_id) {
     SetRequestedCrtc(0);
-    tmp_prop_val_map_ = committed_prop_val_map_;
   }
 }
 
@@ -739,13 +716,14 @@ void DRMPlane::PostCommit(uint32_t crtc_id, bool success) {
   DRM_LOGD("crtc %d", crtc_id);
   if (!success) {
     // To reset
-    PostValidate(crtc_id, success);
+    PostValidate(crtc_id);
     return;
   }
 
   uint32_t assigned_crtc = 0;
   uint32_t requested_crtc = 0;
 
+  CommitProperties();
   GetAssignedCrtc(&assigned_crtc);
   GetRequestedCrtc(&requested_crtc);
 
@@ -764,14 +742,12 @@ void DRMPlane::PostCommit(uint32_t crtc_id, bool success) {
 
   // If we have set a pipe OR unset a pipe during commit, update states
   if (requested_crtc == crtc_id || assigned_crtc == crtc_id) {
-    committed_prop_val_map_ = tmp_prop_val_map_;
     SetAssignedCrtc(requested_crtc);
     SetRequestedCrtc(0);
   }
 }
 
 void DRMPlane::Perform(DRMOps code, drmModeAtomicReq *req, va_list args) {
-  uint32_t prop_id = 0;
   uint32_t obj_id = drm_plane_->plane_id;
 
   switch (code) {
@@ -779,44 +755,31 @@ void DRMPlane::Perform(DRMOps code, drmModeAtomicReq *req, va_list args) {
     case DRMOps::PLANE_SET_SRC_RECT: {
       DRMRect rect = va_arg(args, DRMRect);
       // source co-ordinates accepted by DRM are 16.16 fixed point
-      prop_id = prop_mgr_.GetPropertyId(DRMProperty::SRC_X);
-      AddProperty(req, obj_id, prop_id, rect.left << 16, true /* cache */, tmp_prop_val_map_);
-      prop_id = prop_mgr_.GetPropertyId(DRMProperty::SRC_Y);
-      AddProperty(req, obj_id, prop_id, rect.top << 16, true /* cache */, tmp_prop_val_map_);
-      prop_id = prop_mgr_.GetPropertyId(DRMProperty::SRC_W);
-      AddProperty(req, obj_id, prop_id, (rect.right - rect.left) << 16, true /* cache */,
-                  tmp_prop_val_map_);
-      prop_id = prop_mgr_.GetPropertyId(DRMProperty::SRC_H);
-      AddProperty(req, obj_id, prop_id, (rect.bottom - rect.top) << 16, true /* cache */,
-                  tmp_prop_val_map_);
+      AddProperty(DRMProperty::SRC_X, rect.left << 16);
+      AddProperty(DRMProperty::SRC_Y, rect.top << 16);
+      AddProperty(DRMProperty::SRC_W, (rect.right - rect.left) << 16);
+      AddProperty(DRMProperty::SRC_H, (rect.bottom - rect.top) << 16);
       DRM_LOGV("Plane %d: Setting crop [x,y,w,h][%d,%d,%d,%d]", obj_id, rect.left,
                rect.top, (rect.right - rect.left), (rect.bottom - rect.top));
     } break;
 
     case DRMOps::PLANE_SET_DST_RECT: {
       DRMRect rect = va_arg(args, DRMRect);
-      prop_id = prop_mgr_.GetPropertyId(DRMProperty::CRTC_X);
-      AddProperty(req, obj_id, prop_id, rect.left, true /* cache */, tmp_prop_val_map_);
-      prop_id = prop_mgr_.GetPropertyId(DRMProperty::CRTC_Y);
-      AddProperty(req, obj_id, prop_id, rect.top, true /* cache */, tmp_prop_val_map_);
-      prop_id = prop_mgr_.GetPropertyId(DRMProperty::CRTC_W);
-      AddProperty(req, obj_id, prop_id, (rect.right - rect.left), true /* cache */,
-                  tmp_prop_val_map_);
-      prop_id = prop_mgr_.GetPropertyId(DRMProperty::CRTC_H);
-      AddProperty(req, obj_id, prop_id, (rect.bottom - rect.top), true /* cache */,
-                  tmp_prop_val_map_);
+      AddProperty(DRMProperty::CRTC_X, rect.left);
+      AddProperty(DRMProperty::CRTC_Y, rect.top);
+      AddProperty(DRMProperty::CRTC_W, (rect.right - rect.left));
+      AddProperty(DRMProperty::CRTC_H, (rect.bottom - rect.top));
       DRM_LOGV("Plane %d: Setting dst [x,y,w,h][%d,%d,%d,%d]", obj_id, rect.left,
                rect.top, (rect.right - rect.left), (rect.bottom - rect.top));
     } break;
     case DRMOps::PLANE_SET_EXCL_RECT: {
       DRMRect excl_rect = va_arg(args, DRMRect);
-      SetExclRect(req, excl_rect);
+      SetExclRect(excl_rect);
     } break;
 
     case DRMOps::PLANE_SET_ZORDER: {
       uint32_t zpos = va_arg(args, uint32_t);
-      prop_id = prop_mgr_.GetPropertyId(DRMProperty::ZPOS);
-      AddProperty(req, obj_id, prop_id, zpos, true /* cache */, tmp_prop_val_map_);
+      AddProperty(DRMProperty::ZPOS, zpos);
       DRM_LOGD("Plane %d: Setting z %d", obj_id, zpos);
     } break;
 
@@ -834,76 +797,66 @@ void DRMPlane::Perform(DRMOps code, drmModeAtomicReq *req, va_list args) {
       } else {
         drm_rot_bit_mask |= 1 << ROTATE_0;
       }
-      prop_id = prop_mgr_.GetPropertyId(DRMProperty::ROTATION);
-      AddProperty(req, obj_id, prop_id, drm_rot_bit_mask, true /* cache */, tmp_prop_val_map_);
+      AddProperty(DRMProperty::ROTATION, drm_rot_bit_mask);
       DRM_LOGV("Plane %d: Setting rotation mask %x", obj_id, drm_rot_bit_mask);
     } break;
 
     case DRMOps::PLANE_SET_ALPHA: {
       uint32_t alpha = va_arg(args, uint32_t);
-      prop_id = prop_mgr_.GetPropertyId(DRMProperty::ALPHA);
-      AddProperty(req, obj_id, prop_id, alpha, true /* cache */, tmp_prop_val_map_);
+      AddProperty(DRMProperty::ALPHA, alpha);
       DRM_LOGV("Plane %d: Setting alpha %d", obj_id, alpha);
     } break;
 
     case DRMOps::PLANE_SET_BLEND_TYPE: {
       uint32_t blending = va_arg(args, uint32_t);
-      prop_id = prop_mgr_.GetPropertyId(DRMProperty::BLEND_OP);
-      AddProperty(req, obj_id, prop_id, blending, true /* cache */, tmp_prop_val_map_);
+      AddProperty(DRMProperty::BLEND_OP, blending);
       DRM_LOGV("Plane %d: Setting blending %d", obj_id, blending);
     } break;
 
     case DRMOps::PLANE_SET_H_DECIMATION: {
       uint32_t deci = va_arg(args, uint32_t);
-      prop_id = prop_mgr_.GetPropertyId(DRMProperty::H_DECIMATE);
-      SetDecimation(req, prop_id, deci);
+      SetDecimation(DRMProperty::H_DECIMATE, deci);
     } break;
 
     case DRMOps::PLANE_SET_V_DECIMATION: {
       uint32_t deci = va_arg(args, uint32_t);
-      prop_id = prop_mgr_.GetPropertyId(DRMProperty::V_DECIMATE);
-      SetDecimation(req, prop_id, deci);
+      SetDecimation(DRMProperty::V_DECIMATE, deci);
     } break;
 
     case DRMOps::PLANE_SET_SRC_CONFIG: {
       bool src_config = va_arg(args, uint32_t);
-      prop_id = prop_mgr_.GetPropertyId(DRMProperty::SRC_CONFIG);
-      AddProperty(req, obj_id, prop_id, src_config, true /* cache */, tmp_prop_val_map_);
+      AddProperty(DRMProperty::SRC_CONFIG, src_config);
       DRM_LOGV("Plane %d: Setting src_config flags-%x", obj_id, src_config);
     } break;
 
     case DRMOps::PLANE_SET_CRTC: {
       uint32_t crtc_id = va_arg(args, uint32_t);
-      prop_id = prop_mgr_.GetPropertyId(DRMProperty::CRTC_ID);
-      AddProperty(req, obj_id, prop_id, crtc_id, true /* cache */, tmp_prop_val_map_);
+      AddProperty(DRMProperty::CRTC_ID, crtc_id);
       SetRequestedCrtc(crtc_id);
       DRM_LOGV("Plane %d: Setting crtc %d", obj_id, crtc_id);
     } break;
 
     case DRMOps::PLANE_SET_FB_ID: {
       uint32_t fb_id = va_arg(args, uint32_t);
-      prop_id = prop_mgr_.GetPropertyId(DRMProperty::FB_ID);
-      AddProperty(req, obj_id, prop_id, fb_id, true /* cache */, tmp_prop_val_map_);
+      AddProperty(DRMProperty::FB_ID, fb_id);
       DRM_LOGV("Plane %d: Setting fb_id %d", obj_id, fb_id);
     } break;
 
     case DRMOps::PLANE_SET_ROT_FB_ID: {
       uint32_t fb_id = va_arg(args, uint32_t);
-      prop_id = prop_mgr_.GetPropertyId(DRMProperty::ROT_FB_ID);
-      drmModeAtomicAddProperty(req, obj_id, prop_id, fb_id);
+      AddProperty(DRMProperty::ROT_FB_ID, fb_id, true);
       DRM_LOGV("Plane %d: Setting rot_fb_id %d", obj_id, fb_id);
     } break;
 
     case DRMOps::PLANE_SET_INPUT_FENCE: {
       int fence = va_arg(args, int);
-      prop_id = prop_mgr_.GetPropertyId(DRMProperty::INPUT_FENCE);
-      AddProperty(req, obj_id, prop_id, fence, false /* cache */, tmp_prop_val_map_);
+      AddProperty(DRMProperty::INPUT_FENCE, fence, true);
       DRM_LOGV("Plane %d: Setting input fence %d", obj_id, fence);
     } break;
 
     case DRMOps::PLANE_SET_SCALER_CONFIG: {
       uint64_t handle = va_arg(args, uint64_t);
-      if (SetScalerConfig(req, handle)) {
+      if (SetScalerConfig(handle)) {
         DRM_LOGV("Plane %d: Setting scaler config", obj_id);
       }
     } break;
@@ -929,33 +882,31 @@ void DRMPlane::Perform(DRMOps code, drmModeAtomicReq *req, va_list args) {
           break;
       }
 
-      prop_id = prop_mgr_.GetPropertyId(DRMProperty::FB_TRANSLATION_MODE);
-      AddProperty(req, obj_id, prop_id, fb_secure_mode, true /* cache */, tmp_prop_val_map_);
+      AddProperty(DRMProperty::FB_TRANSLATION_MODE, fb_secure_mode);
       DRM_LOGD("Plane %d: Setting FB secure mode %d", obj_id, fb_secure_mode);
     } break;
 
     case DRMOps::PLANE_SET_CSC_CONFIG: {
       uint32_t* csc_type = va_arg(args, uint32_t*);
       if (csc_type) {
-        SetCscConfig(req, (DRMCscType)*csc_type);
+        SetCscConfig((DRMCscType)*csc_type);
       }
     } break;
 
     case DRMOps::PLANE_SET_MULTIRECT_MODE: {
       DRMMultiRectMode drm_multirect_mode = (DRMMultiRectMode)va_arg(args, uint32_t);
-      SetMultiRectMode(req, drm_multirect_mode);
+      SetMultiRectMode(drm_multirect_mode);
     } break;
 
     case DRMOps::PLANE_SET_INVERSE_PMA: {
        uint32_t pma = va_arg(args, uint32_t);
-       prop_id = prop_mgr_.GetPropertyId(DRMProperty::INVERSE_PMA);
-       AddProperty(req, obj_id, prop_id, pma, true /* cache */, tmp_prop_val_map_);
+       AddProperty(DRMProperty::INVERSE_PMA, pma);
        DRM_LOGD("Plane %d: %s inverse pma", obj_id, pma ? "Setting" : "Resetting");
      } break;
 
     case DRMOps::PLANE_SET_DGM_CSC_CONFIG: {
       uint64_t handle = va_arg(args, uint64_t);
-      if (SetDgmCscConfig(req, handle)) {
+      if (SetDgmCscConfig(handle)) {
         DRM_LOGD("Plane %d: Setting Csc Lut config", obj_id);
       }
     } break;
@@ -1022,7 +973,7 @@ void DRMPlane::Dump() {
     DRM_LOGE(" %4.4s", (char *)&drm_plane_->formats[i]);
 }
 
-void DRMPlane::SetMultiRectMode(drmModeAtomicReq *req, DRMMultiRectMode drm_multirect_mode) {
+void DRMPlane::SetMultiRectMode(DRMMultiRectMode drm_multirect_mode) {
     if (!plane_type_info_.multirect_prop_present) {
       return;
     }
@@ -1039,11 +990,10 @@ void DRMPlane::SetMultiRectMode(drmModeAtomicReq *req, DRMMultiRectMode drm_mult
         multirect_mode = MULTIRECT_SERIAL;
         break;
       default:
-        DRM_LOGE("Invalid multirect mode %d to set on plane %d", drm_multirect_mode, obj_id);
+        DRM_LOGE("Invalid multirect mode %d to set on plane %d", drm_multirect_mode, GetObjectId());
         break;
     }
-    auto prop_id = prop_mgr_.GetPropertyId(DRMProperty::MULTIRECT_MODE);
-    AddProperty(req, obj_id, prop_id, multirect_mode, true /* cache */, tmp_prop_val_map_);
+    AddProperty(DRMProperty::MULTIRECT_MODE, multirect_mode);
     DRM_LOGD("Plane %d: Setting multirect_mode %d", obj_id, multirect_mode);
 }
 
@@ -1062,22 +1012,17 @@ void DRMPlane::Unset(bool is_commit, drmModeAtomicReq *req) {
   // Reset the sspp tonemap properties if they were set and update the in-use only if
   // its a Commit as Unset is called in Validate as well.
   if (dgm_csc_in_use_) {
-    auto prop_id = prop_mgr_.GetPropertyId(DRMProperty::CSC_DMA_V1);
     uint64_t csc_v1 = 0;
-    AddProperty(req, drm_plane_->plane_id, prop_id, csc_v1, false /* cache */, tmp_prop_val_map_);
+    AddProperty(DRMProperty::CSC_DMA_V1, csc_v1, true);
     DRM_LOGV("Plane %d Clearing DGM CSC", drm_plane_->plane_id);
     dgm_csc_in_use_ = !is_commit;
   }
   ResetColorLUTs(is_commit, req);
-
-  tmp_prop_val_map_.clear();
-  committed_prop_val_map_.clear();
 }
 
-bool DRMPlane::SetDgmCscConfig(drmModeAtomicReq *req, uint64_t handle) {
+bool DRMPlane::SetDgmCscConfig(uint64_t handle) {
   if (plane_type_info_.type == DRMPlaneType::DMA &&
       prop_mgr_.IsPropertyAvailable(DRMProperty::CSC_DMA_V1)) {
-    auto prop_id = prop_mgr_.GetPropertyId(DRMProperty::CSC_DMA_V1);
     sde_drm_csc_v1 *csc_v1 = reinterpret_cast<sde_drm_csc_v1 *>(handle);
     uint64_t csc_v1_data = 0;
     sde_drm_csc_v1 csc_v1_tmp = {};
@@ -1085,9 +1030,7 @@ bool DRMPlane::SetDgmCscConfig(drmModeAtomicReq *req, uint64_t handle) {
     if (std::memcmp(&csc_config_copy_, &csc_v1_tmp, sizeof(sde_drm_csc_v1)) != 0) {
       csc_v1_data = reinterpret_cast<uint64_t>(&csc_config_copy_);
     }
-    AddProperty(req, drm_plane_->plane_id, prop_id,
-                reinterpret_cast<uint64_t>(csc_v1_data), false /* cache */,
-                tmp_prop_val_map_);
+    AddProperty(DRMProperty::CSC_DMA_V1, csc_v1_data, true);
     dgm_csc_in_use_ = (csc_v1_data != 0);
     DRM_LOGV("Plane %d Dgm CSC = %lld in_use = %d", drm_plane_->plane_id, csc_v1_data,
              dgm_csc_in_use_);
@@ -1101,7 +1044,7 @@ bool DRMPlane::SetDgmCscConfig(drmModeAtomicReq *req, uint64_t handle) {
 void DRMPlane::ResetColorLUTs(bool is_commit, drmModeAtomicReq *req) {
   // Reset the color luts if they were set and update the state only if its a Commit as Unset
   // is called in Validate as well.
-  for (int i = 0; i <= (int32_t)(DRMTonemapLutType::VIG_3D_GAMUT); i++) {
+  for (int i = 0; i <= static_cast<int>(DRMTonemapLutType::VIG_3D_GAMUT); i++) {
     auto itr = plane_type_info_.tonemap_lut_version_map.find(static_cast<DRMTonemapLutType>(i));
     if (itr != plane_type_info_.tonemap_lut_version_map.end()) {
       ResetColorLUTState(static_cast<DRMTonemapLutType>(i), is_commit, req);
