@@ -53,20 +53,6 @@ LOCAL_ADDITIONAL_DEPENDENCIES := $(common_deps)
 LOCAL_SRC_FILES               := gr_allocator.cpp gr_buf_mgr.cpp gr_ion_alloc.cpp
 include $(BUILD_SHARED_LIBRARY)
 
-#Get the display mapper version available
-qti_mapper1_1_version := $(shell \
-    if [ -d "$(TOP)/vendor/qcom/opensource/interfaces/display/mapper/1.1" ];\
-    then echo QTI_MAPPER_1_1; fi)
-
-qti_mapper_version := $(shell \
-    if [ -d "$(TOP)/vendor/qcom/opensource/interfaces/display/mapper/1.0" ];\
-    then echo QTI_MAPPER_1_0; fi)
-
-qti_allocator_version := $(shell \
-    if [ -d "$(TOP)/vendor/qcom/opensource/interfaces/display/allocator/1.0" ];\
-    then echo QTI_ALLOCATOR_1_0; fi)
-
-ifeq ($(qti_mapper_version), QTI_MAPPER_1_0)
 #mapper
 include $(CLEAR_VARS)
 LOCAL_MODULE                  := android.hardware.graphics.mapper@2.0-impl-qti-display
@@ -93,9 +79,7 @@ endif
 LOCAL_ADDITIONAL_DEPENDENCIES := $(common_deps)
 LOCAL_SRC_FILES               := QtiMapper.cpp
 include $(BUILD_SHARED_LIBRARY)
-endif
 
-ifeq ($(qti_allocator_version), QTI_ALLOCATOR_1_0)
 #allocator
 include $(CLEAR_VARS)
 LOCAL_MODULE                  := vendor.qti.hardware.display.allocator@1.0-service
@@ -118,4 +102,3 @@ LOCAL_C_INCLUDES              := $(common_includes) $(kernel_includes)
 LOCAL_SRC_FILES               := QtiAllocator.cpp service.cpp
 LOCAL_INIT_RC                 := vendor.qti.hardware.display.allocator@1.0-service.rc
 include $(BUILD_EXECUTABLE)
-endif
