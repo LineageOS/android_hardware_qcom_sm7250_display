@@ -13,7 +13,6 @@ cc_defaults {
         "-Wconversion",
         "-Wall",
         "-Werror",
-        "-std=c++14",
     ],
     shared_libs: [
         "liblog",
