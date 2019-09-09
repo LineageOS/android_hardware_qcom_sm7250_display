@@ -172,6 +172,10 @@ HWC2::Error HWCColorMode::CacheColorModeWithRenderIntent(ColorMode mode, RenderI
 }
 
 HWC2::Error HWCColorMode::ApplyCurrentColorModeWithRenderIntent(bool hdr_present) {
+  // If panel does not support color modes, do not set color mode.
+  if (color_mode_map_.size() <= 1) {
+    return HWC2::Error::None;
+  }
   if (!apply_mode_) {
     if ((hdr_present && curr_dynamic_range_ == kHdrType) ||
       (!hdr_present && curr_dynamic_range_ == kSdrType))
@@ -185,10 +189,15 @@ HWC2::Error HWCColorMode::ApplyCurrentColorModeWithRenderIntent(bool hdr_present
   std::string mode_string = preferred_mode_[current_color_mode_][curr_dynamic_range_];
   if (mode_string.empty()) {
     mode_string = color_mode_map_[current_color_mode_][current_render_intent_][curr_dynamic_range_];
+    if (mode_string.empty() && hdr_present) {
+      // Use the colorimetric HDR mode, if an HDR mode with the current render intent is not present
+      mode_string = color_mode_map_[current_color_mode_][RenderIntent::COLORIMETRIC][kHdrType];
+    }
     if (mode_string.empty() &&
-      current_color_mode_ == ColorMode::DISPLAY_P3 &&
-      curr_dynamic_range_ == kHdrType) {
-      // fall back to display_p3 SDR mode if there is no HDR mode
+       (current_color_mode_ == ColorMode::DISPLAY_P3 ||
+       current_color_mode_ == ColorMode::DISPLAY_BT2020) &&
+       curr_dynamic_range_ == kHdrType) {
+      // fall back to display_p3/display_bt2020 SDR mode if there is no HDR mode
       mode_string = color_mode_map_[current_color_mode_][current_render_intent_][kSdrType];
     }
   }
@@ -631,7 +640,7 @@ HWC2::Error HWCDisplay::CreateLayer(hwc2_layer_t *out_layer_id) {
 HWCLayer *HWCDisplay::GetHWCLayer(hwc2_layer_t layer_id) {
   const auto map_layer = layer_map_.find(layer_id);
   if (map_layer == layer_map_.end()) {
-    DLOGW("[%" PRIu64 "] GetLayer(%" PRIu64 ") failed: no such layer", id_, layer_id);
+    DLOGE("[%" PRIu64 "] GetLayer(%" PRIu64 ") failed: no such layer", id_, layer_id);
     return nullptr;
   } else {
     return map_layer->second;
@@ -641,7 +650,7 @@ HWCLayer *HWCDisplay::GetHWCLayer(hwc2_layer_t layer_id) {
 HWC2::Error HWCDisplay::DestroyLayer(hwc2_layer_t layer_id) {
   const auto map_layer = layer_map_.find(layer_id);
   if (map_layer == layer_map_.end()) {
-    DLOGW("[%" PRIu64 "] destroyLayer(%" PRIu64 ") failed: no such layer", id_, layer_id);
+    DLOGE("[%" PRIu64 "] destroyLayer(%" PRIu64 ") failed: no such layer", id_, layer_id);
     return HWC2::Error::BadLayer;
   }
   const auto layer = map_layer->second;
@@ -701,11 +710,13 @@ void HWCDisplay::BuildLayerStack() {
     }
 
     bool is_secure = false;
+    bool is_video = false;
     const private_handle_t *handle =
         reinterpret_cast<const private_handle_t *>(layer->input_buffer.buffer_id);
     if (handle) {
       if (handle->buffer_type == BUFFER_TYPE_VIDEO) {
         layer_stack_.flags.video_present = true;
+        is_video = true;
       }
       // TZ Protected Buffer - L1
       // Gralloc Usage Protected Buffer - L3 - which needs to be treated as Secure & avoid fallback
@@ -721,6 +732,7 @@ void HWCDisplay::BuildLayerStack() {
     }
 
     if (layer->input_buffer.flags.secure_display) {
+      layer_stack_.flags.secure_present = true;
       is_secure = true;
     }
 
@@ -728,14 +740,6 @@ void HWCDisplay::BuildLayerStack() {
        !(hwc_layer->IsRotationPresent() || hwc_layer->IsScalingPresent())) {
       layer->flags.single_buffer = true;
       layer_stack_.flags.single_buffered_layer_present = true;
-    }
-
-    if (hwc_layer->GetClientRequestedCompositionType() == HWC2::Composition::Cursor) {
-      // Currently we support only one HWCursor & only at top most z-order
-      if ((*layer_set_.rbegin())->GetId() == hwc_layer->GetId()) {
-        layer->flags.cursor = true;
-        layer_stack_.flags.cursor_present = true;
-      }
     }
 
     bool hdr_layer = layer->input_buffer.color_metadata.colorPrimaries == ColorPrimaries_BT2020 &&
@@ -748,8 +752,17 @@ void HWCDisplay::BuildLayerStack() {
     }
 
     if (hwc_layer->IsNonIntegralSourceCrop() && !is_secure && !hdr_layer &&
-        !layer->flags.single_buffer && !layer->flags.solid_fill) {
+        !layer->flags.single_buffer && !layer->flags.solid_fill && !is_video) {
       layer->flags.skip = true;
+    }
+
+    if (!layer->flags.skip &&
+        (hwc_layer->GetClientRequestedCompositionType() == HWC2::Composition::Cursor)) {
+      // Currently we support only one HWCursor & only at top most z-order
+      if ((*layer_set_.rbegin())->GetId() == hwc_layer->GetId()) {
+        layer->flags.cursor = true;
+        layer_stack_.flags.cursor_present = true;
+      }
     }
 
     if (layer->flags.skip) {
@@ -795,11 +808,21 @@ void HWCDisplay::BuildLayerStack() {
       layer->flags.color_transform = true;
     }
 
+    layer_stack_.flags.mask_present |= layer->input_buffer.flags.mask_layer;
+
+    if ((hwc_layer->GetDeviceSelectedCompositionType() != HWC2::Composition::Device) ||
+        (hwc_layer->GetClientRequestedCompositionType() != HWC2::Composition::Device) ||
+        layer->flags.skip) {
+      layer->update_mask.set(kClientCompRequest);
+    }
+
     layer_stack_.layers.push_back(layer);
   }
 
   // TODO(user): Set correctly when SDM supports geometry_changes as bitmask
   layer_stack_.flags.geometry_changed = UINT32(geometry_changes_ > 0);
+  layer_stack_.flags.config_changed = !validated_;
+
   // Append client target to the layer stack
   Layer *sdm_client_target = client_target_->GetSDMLayer();
   sdm_client_target->flags.updating = IsLayerUpdating(client_target_);
@@ -830,7 +853,7 @@ void HWCDisplay::BuildSolidFillStack() {
 HWC2::Error HWCDisplay::SetLayerZOrder(hwc2_layer_t layer_id, uint32_t z) {
   const auto map_layer = layer_map_.find(layer_id);
   if (map_layer == layer_map_.end()) {
-    DLOGW("[%" PRIu64 "] updateLayerZ failed to find layer", id_);
+    DLOGE("[%" PRIu64 "] updateLayerZ failed to find layer", id_);
     return HWC2::Error::BadLayer;
   }
 
@@ -890,6 +913,29 @@ HWC2::Error HWCDisplay::SetVsyncEnabled(HWC2::Vsync enabled) {
   return HWC2::Error::None;
 }
 
+void HWCDisplay::PostPowerMode() {
+  if (release_fence_ < 0) {
+    return;
+  }
+
+  for (auto hwc_layer : layer_set_) {
+    auto fence = hwc_layer->PopBackReleaseFence();
+    auto merged_fence = -1;
+    if (fence >= 0) {
+      merged_fence = sync_merge("sync_merge", release_fence_, fence);
+      ::close(fence);
+    } else {
+      merged_fence = ::dup(release_fence_);
+    }
+    hwc_layer->PushBackReleaseFence(merged_fence);
+  }
+
+  // Add this release fence onto fbt_release fence.
+  CloseFd(&fbt_release_fence_);
+  fbt_release_fence_ = release_fence_;
+  release_fence_ = -1;
+}
+
 HWC2::Error HWCDisplay::SetPowerMode(HWC2::PowerMode mode, bool teardown) {
   DLOGV("display = %d, mode = %s", id_, to_string(mode).c_str());
   DisplayState state = kStateOff;
@@ -938,23 +984,8 @@ HWC2::Error HWCDisplay::SetPowerMode(HWC2::PowerMode mode, bool teardown) {
     return HWC2::Error::BadParameter;
   }
 
-  if (release_fence >= 0) {
-    for (auto hwc_layer : layer_set_) {
-      auto fence = hwc_layer->PopBackReleaseFence();
-      auto merged_fence = -1;
-      if (fence >= 0) {
-        merged_fence = sync_merge("sync_merge", release_fence, fence);
-        ::close(fence);
-      } else {
-        merged_fence = ::dup(release_fence);
-      }
-      hwc_layer->PushBackReleaseFence(merged_fence);
-    }
-
-    // Add this release fence onto fbt_release fence.
-    CloseFd(&fbt_release_fence_);
-    fbt_release_fence_ = release_fence;
-  }
+  // Update release fence.
+  release_fence_ = release_fence;
   current_power_mode_ = mode;
   return HWC2::Error::None;
 }
@@ -1210,7 +1241,8 @@ DisplayError HWCDisplay::VSync(const DisplayEventVSync &vsync) {
 }
 
 DisplayError HWCDisplay::Refresh() {
-  return kErrorNotSupported;
+  callbacks_->Refresh(id_);
+  return kErrorNone;
 }
 
 DisplayError HWCDisplay::CECMessage(char *message) {
@@ -1288,6 +1320,10 @@ HWC2::Error HWCDisplay::PrepareLayerStack(uint32_t *out_num_types, uint32_t *out
       // so that previous buffer and fences are released, and override the error.
       flush_ = true;
       validated_ = false;
+      // Prepare cycle can fail on a newly connected display if insufficient pipes
+      // are available at this moment. Trigger refresh so that the other displays
+      // can free up pipes and a valid content can be attached to virtual display.
+      callbacks_->Refresh(id_);
       return HWC2::Error::BadDisplay;
     }
   }
@@ -1559,10 +1595,11 @@ HWC2::Error HWCDisplay::PostCommitLayerStack(int32_t *out_retire_fence) {
       // release fences and discard fences from driver
       if (swap_interval_zero_ || layer->flags.single_buffer) {
         close(layer_buffer->release_fence_fd);
-      } else if (layer->composition != kCompositionGPU) {
-        hwc_layer->PushBackReleaseFence(layer_buffer->release_fence_fd);
       } else {
-        hwc_layer->PushBackReleaseFence(-1);
+        // It may so happen that layer gets marked to GPU & app layer gets queued
+        // to MDP for composition. In those scenarios, release fence of buffer should
+        // have mdp and gpu sync points merged.
+        hwc_layer->PushBackReleaseFence(layer_buffer->release_fence_fd);
       }
     } else {
       // In case of flush or display paused, we don't return an error to f/w, so it will
@@ -2053,6 +2090,7 @@ int HWCDisplay::HandleSecureSession(const std::bitset<kSecureMax> &secure_sessio
 
   if (active_secure_sessions_[kSecureDisplay] != secure_sessions[kSecureDisplay]) {
     if (secure_sessions[kSecureDisplay]) {
+      pending_power_mode_ = current_power_mode_;
       HWC2::Error error = SetPowerMode(HWC2::PowerMode::Off, true /* teardown */);
       if (error != HWC2::Error::None) {
         DLOGE("SetPowerMode failed. Error = %d", error);
@@ -2061,9 +2099,9 @@ int HWCDisplay::HandleSecureSession(const std::bitset<kSecureMax> &secure_sessio
       *power_on_pending = true;
     }
 
-    DLOGI("SecureDisplay state changed from %d to %d for display %d",
+    DLOGI("SecureDisplay state changed from %d to %d for display %d-%d",
           active_secure_sessions_.test(kSecureDisplay), secure_sessions.test(kSecureDisplay),
-          type_);
+          id_, type_);
   }
   active_secure_sessions_ = secure_sessions;
   return 0;
@@ -2095,7 +2133,6 @@ int HWCDisplay::SetActiveDisplayConfig(uint32_t config) {
 
   validated_ = false;
   display_intf_->SetActiveConfig(config);
-  callbacks_->Refresh(id_);
 
   return 0;
 }
@@ -2244,6 +2281,10 @@ bool HWCDisplay::CanSkipValidate() {
     }
   }
 
+  if (!layer_set_.empty() && !display_intf_->CanSkipValidate()) {
+    return false;
+  }
+
   return true;
 }
 
@@ -2353,6 +2394,18 @@ void HWCDisplay::WaitOnPreviousFence() {
       return;
     }
   }
+}
+
+void HWCDisplay::GetLayerStack(HWCLayerStack *stack) {
+  stack->client_target = client_target_;
+  stack->layer_map = layer_map_;
+  stack->layer_set = layer_set_;
+}
+
+void HWCDisplay::SetLayerStack(HWCLayerStack *stack) {
+  client_target_ = stack->client_target;
+  layer_map_ = stack->layer_map;
+  layer_set_ = stack->layer_set;
 }
 
 }  // namespace sdm

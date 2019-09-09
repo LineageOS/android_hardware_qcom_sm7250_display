@@ -1,9 +1,8 @@
 # Display product definitions
 PRODUCT_PACKAGES += \
-    android.hardware.graphics.composer@2.3-impl \
-    android.hardware.graphics.composer@2.3-service \
     android.hardware.graphics.mapper@2.0-impl-qti-display \
-    vendor.qti.hardware.display.allocator@1.0-service \
+    vendor.qti.hardware.display.allocator-service \
+    vendor.qti.hardware.display.composer-service \
     android.hardware.memtrack@1.0-impl \
     android.hardware.memtrack@1.0-service \
     android.hardware.light@2.0-impl \
@@ -13,6 +12,7 @@ PRODUCT_PACKAGES += \
     hwcomposer.$(TARGET_BOARD_PLATFORM) \
     memtrack.$(TARGET_BOARD_PLATFORM) \
     libqdMetaData \
+    libdisplayconfig.vendor \
     vendor.display.config@1.0.vendor \
     vendor.display.config@1.1.vendor \
     vendor.display.config@1.2.vendor \
@@ -22,6 +22,8 @@ PRODUCT_PACKAGES += \
     vendor.display.config@1.6.vendor \
     vendor.display.config@1.7.vendor \
     vendor.display.config@1.8.vendor \
+    vendor.display.config@1.9.vendor \
+    vendor.display.config@1.10.vendor \
     modetest
 
 #QDCM calibration xml file for 2k panel
@@ -41,6 +43,7 @@ PRODUCT_COPY_FILES += hardware/qcom/display/config/qdcm_calib_data_default.xml:$
 PRODUCT_PROPERTY_OVERRIDES += \
     persist.demo.hdmirotationlock=false \
     persist.sys.sf.color_saturation=1.0 \
+    persist.sys.sf.color_mode=9 \
     debug.sf.hw=0 \
     debug.egl.hw=0 \
     debug.sf.latch_unsignaled=1 \
@@ -50,9 +53,20 @@ PRODUCT_PROPERTY_OVERRIDES += \
     vendor.display.disable_offline_rotator=1 \
     vendor.display.disable_excl_rect=0 \
     vendor.display.comp_mask=0 \
-    vendor.display.enable_default_color_mode=1 \
     vendor.display.enable_posted_start_dyn=1 \
+    vendor.display.enable_optimize_refresh=1 \
     vendor.display.use_smooth_motion=1
+
+ifeq ($(TARGET_BOARD_PLATFORM),kona)
+PRODUCT_PROPERTY_OVERRIDES += \
+    debug.sf.early_phase_offset_ns=500000 \
+    debug.sf.early_app_phase_offset_ns=500000 \
+    debug.sf.early_gl_phase_offset_ns=3000000 \
+    debug.sf.early_gl_app_phase_offset_ns=15000000 \
+    debug.sf.high_fps_early_phase_offset_ns=6100000 \
+    debug.sf.high_fps_early_gl_phase_offset_ns=9000000 \
+    debug.sf.phase_offset_threshold_for_next_vsync_ns=6100000
+endif
 
 #Set WCG properties
 PRODUCT_DEFAULT_PROPERTY_OVERRIDES += ro.surface_flinger.has_wide_color_display=true
@@ -83,10 +97,3 @@ endif
 
 # Properties using default value:
 #    vendor.display.disable_hw_recovery=0
-
-# This matrix should be in column major order, per SurfaceFlinger requirement
-#  1.0   0.0   0.0
-#  0.0   1.0   0.0
-#  0.0   0.0   1.0
-PRODUCT_PROPERTY_OVERRIDES += \
-    vendor.display.dataspace_saturation_matrix=1.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,1.0

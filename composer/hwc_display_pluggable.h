@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2018, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2019, The Linux Foundation. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -27,41 +27,49 @@
  * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef __HWC_DISPLAY_VIRTUAL_H__
-#define __HWC_DISPLAY_VIRTUAL_H__
+#ifndef __HWC_DISPLAY_PLUGGABLE_H__
+#define __HWC_DISPLAY_PLUGGABLE_H__
 
-#include <qdMetaData.h>
-#include <gralloc_priv.h>
 #include "hwc_display.h"
+#include "display_null.h"
 #include "hwc_display_event_handler.h"
 
 namespace sdm {
 
-class HWCDisplayVirtual : public HWCDisplay {
+class HWCDisplayPluggable : public HWCDisplay {
  public:
   static int Create(CoreInterface *core_intf, HWCBufferAllocator *buffer_allocator,
-                    HWCCallbacks *callbacks, hwc2_display_t id, int32_t sdm_id, uint32_t width,
-                    uint32_t height, int32_t *format, HWCDisplay **hwc_display);
+                    HWCCallbacks *callbacks, HWCDisplayEventHandler *event_handler,
+                    qService::QService *qservice, hwc2_display_t id,
+                    int32_t sdm_id, uint32_t primary_width, uint32_t primary_height,
+                    bool use_primary_res, HWCDisplay **hwc_display);
   static void Destroy(HWCDisplay *hwc_display);
   virtual int Init();
-  virtual int Deinit();
   virtual HWC2::Error Validate(uint32_t *out_num_types, uint32_t *out_num_requests);
   virtual HWC2::Error Present(int32_t *out_retire_fence);
-  virtual HWC2::Error SetFrameDumpConfig(uint32_t count, uint32_t bit_mask_layer_type,
-                                         int32_t format, bool post_processed);
-  virtual HWC2::Error GetDisplayType(int32_t *out_type);
-  HWC2::Error SetOutputBuffer(buffer_handle_t buf, int32_t release_fence);
+  virtual int SetState(bool connected);
+  virtual DisplayError Flush();
+  virtual HWC2::Error GetColorModes(uint32_t *out_num_modes, ColorMode *out_modes);
+  virtual HWC2::Error GetRenderIntents(ColorMode mode, uint32_t *out_num_intents,
+                                       RenderIntent *out_intents);
+  virtual HWC2::Error SetColorMode(ColorMode mode);
+  virtual HWC2::Error SetColorModeWithRenderIntent(ColorMode mode, RenderIntent intent);
+  virtual HWC2::Error UpdatePowerMode(HWC2::PowerMode mode);
 
  private:
-  HWCDisplayVirtual(CoreInterface *core_intf, HWCBufferAllocator *buffer_allocator,
-                    HWCCallbacks *callbacks, hwc2_display_t id, int32_t sdm_id);
-  int SetConfig(uint32_t width, uint32_t height);
+  HWCDisplayPluggable(CoreInterface *core_intf, HWCBufferAllocator *buffer_allocator,
+                      HWCCallbacks *callbacks, HWCDisplayEventHandler *event_handler,
+                      qService::QService *qservice, hwc2_display_t id, int32_t sdm_id);
+  void ApplyScanAdjustment(hwc_rect_t *display_frame);
+  void GetUnderScanConfig();
+  static void GetDownscaleResolution(uint32_t primary_width, uint32_t primary_height,
+                                     uint32_t *virtual_width, uint32_t *virtual_height);
 
-  bool dump_output_layer_ = false;
-  LayerBuffer *output_buffer_ = NULL;
-  const private_handle_t *output_handle_ = nullptr;
+  DisplayNullExternal display_null_;
+  int underscan_width_ = 0;
+  int underscan_height_ = 0;
 };
 
 }  // namespace sdm
 
-#endif  // __HWC_DISPLAY_VIRTUAL_H__
+#endif  // __HWC_DISPLAY_PLUGGABLE_H__
