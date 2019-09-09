@@ -103,6 +103,9 @@ class DisplayBase : public DisplayInterface {
   virtual DisplayError GetSupportedDSIClock(std::vector<uint64_t> *bitclk_rates) {
     return kErrorNotSupported;
   }
+  virtual DisplayError SetPanelLuminanceAttributes(float min_lum, float max_lum) {
+    return kErrorNotSupported;
+  }
   virtual DisplayError GetColorModeCount(uint32_t *mode_count);
   virtual DisplayError GetColorModes(uint32_t *mode_count, std::vector<std::string> *color_modes);
   virtual DisplayError GetColorModeAttr(const std::string &color_mode, AttrVal *attr);
@@ -150,6 +153,9 @@ class DisplayBase : public DisplayInterface {
   virtual DisplayError SetFrameTriggerMode(FrameTriggerMode mode) {
     return kErrorNotSupported;
   }
+  virtual DisplayError GetRefreshRate(uint32_t *refresh_rate) { return kErrorNotSupported; }
+  virtual bool CanSkipValidate();
+  virtual DisplayError SetBLScale(uint32_t level) { return kErrorNotSupported; }
 
  protected:
   const char *kBt2020Pq = "bt2020_pq";
@@ -183,6 +189,8 @@ class DisplayBase : public DisplayInterface {
   PrimariesTransfer GetBlendSpaceFromColorMode();
   bool IsHdrMode(const AttrVal &attr);
   void InsertBT2020PqHlgModes();
+  DisplayError HandlePendingVSyncEnable(int32_t retire_fence);
+  DisplayError ResetPendingDoze(int32_t retire_fence);
 
   recursive_mutex recursive_mutex_;
   int32_t display_id_ = -1;
@@ -224,7 +232,6 @@ class DisplayBase : public DisplayInterface {
   uint32_t req_mixer_width_ = 0;
   uint32_t req_mixer_height_ = 0;
   std::string current_color_mode_ = "hal_native";
-  int disable_hdr_lut_gen_ = 0;
   bool hw_recovery_logs_captured_ = false;
   int disable_hw_recovery_dump_ = 0;
   HWQosData default_qos_data_;
@@ -233,10 +240,9 @@ class DisplayBase : public DisplayInterface {
   bool drop_skewed_vsync_ = false;
   bool custom_mixer_resolution_ = false;
   DisplayState power_state_pending_ = kStateOff;
-  bool vsync_state_change_pending_ = false;
-  // requested_vsync_state: true -> enable vsync, false -> disable vsync
-  bool requested_vsync_state_ = false;
+  bool vsync_enable_pending_ = false;
   bool defer_power_state_ = false;
+  bool pending_doze_ = false;
 
   static Locker display_power_reset_lock_;
   static bool display_power_reset_pending_;

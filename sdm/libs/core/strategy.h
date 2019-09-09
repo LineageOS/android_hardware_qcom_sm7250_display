@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2014 - 2018, The Linux Foundation. All rights reserved.
+* Copyright (c) 2014 - 2019, The Linux Foundation. All rights reserved.
 *
 * Redistribution and use in source and binary forms, with or without modification, are permitted
 * provided that the following conditions are met:
@@ -43,8 +43,7 @@ class Strategy {
   DisplayError Init();
   DisplayError Deinit();
 
-  DisplayError Start(HWLayersInfo *hw_layers_info, uint32_t *max_attempts,
-                     const PUConstraints &pu_constraints);
+  DisplayError Start(HWLayersInfo *hw_layers_info, uint32_t *max_attempts);
   DisplayError GetNextStrategy(StrategyConstraints *constraints);
   DisplayError Stop();
   DisplayError Reconfigure(const HWPanelInfo &hw_panel_info,
@@ -56,6 +55,8 @@ class Strategy {
   DisplayError SetIdleTimeoutMs(uint32_t active_ms);
   DisplayError SetColorModesInfo(const std::vector<PrimariesTransfer> &colormodes_cs);
   DisplayError SetBlendSpace(const PrimariesTransfer &blend_space);
+  bool CanSkipValidate();
+  void GenerateROI(HWLayersInfo *hw_layers_info, const PUConstraints &pu_constraints);
 
  private:
   void GenerateROI();
