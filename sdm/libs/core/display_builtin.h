@@ -41,11 +41,12 @@ class DppsInfo {
   void DppsNotifyOps(enum DppsNotifyOps op, void *payload, size_t size);
 
  private:
-  const char *kDppsLib = "libdpps.so";
-  DynLib dpps_impl_lib;
-  DppsInterface *dpps_intf = NULL;
+  const char *kDppsLib_ = "libdpps.so";
+  DynLib dpps_impl_lib_;
+  static DppsInterface *dpps_intf_;
+  static std::vector<int32_t> display_id_;
+  std::mutex lock_;
   DppsInterface *(*GetDppsInterface)() = NULL;
-  bool dpps_initialized_ = false;
 };
 
 class DisplayBuiltIn : public DisplayBase, HWEventHandler, DppsPropIntf {
@@ -70,6 +71,7 @@ class DisplayBuiltIn : public DisplayBase, HWEventHandler, DppsPropIntf {
   virtual DisplayError SetRefreshRate(uint32_t refresh_rate, bool final_rate);
   virtual DisplayError SetPanelBrightness(float brightness);
   virtual DisplayError GetPanelBrightness(float *brightness);
+  virtual DisplayError GetRefreshRate(uint32_t *refresh_rate);
   virtual DisplayError HandleSecureEvent(SecureEvent secure_event, LayerStack *layer_stack);
   virtual DisplayError SetDisplayDppsAdROI(void *payload);
   virtual DisplayError SetQSyncMode(QSyncMode qsync_mode);
@@ -78,6 +80,7 @@ class DisplayBuiltIn : public DisplayBase, HWEventHandler, DppsPropIntf {
   virtual DisplayError GetDynamicDSIClock(uint64_t *bit_clk_rate);
   virtual DisplayError GetSupportedDSIClock(std::vector<uint64_t> *bitclk_rates);
   virtual DisplayError SetFrameTriggerMode(FrameTriggerMode mode);
+  virtual DisplayError SetBLScale(uint32_t level);
 
   // Implement the HWEventHandlers
   virtual DisplayError VSync(int64_t timestamp);
@@ -97,6 +100,8 @@ class DisplayBuiltIn : public DisplayBase, HWEventHandler, DppsPropIntf {
 
  private:
   bool NeedsAVREnable();
+  bool CanCompareFrameROI(LayerStack *layer_stack);
+  bool CanSkipDisplayPrepare(LayerStack *layer_stack);
 
   std::vector<HWEvent> event_list_;
   bool avr_prop_disabled_ = false;
@@ -108,6 +113,11 @@ class DisplayBuiltIn : public DisplayBase, HWEventHandler, DppsPropIntf {
   QSyncMode qsync_mode_ = kQSyncModeNone;
   FrameTriggerMode trigger_mode_debug_ = kFrameTriggerMax;
   float level_remainder_ = 0.0f;
+  float cached_brightness_ = 0.0f;
+  bool pending_brightness_ = false;
+  recursive_mutex brightness_lock_;
+  LayerRect left_frame_roi_ = {};
+  LayerRect right_frame_roi_ = {};
 };
 
 }  // namespace sdm

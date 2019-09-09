@@ -119,15 +119,15 @@ int HWCDisplayBuiltIn::Init() {
   }
   color_mode_ = new HWCColorMode(display_intf_);
   color_mode_->Init();
-  HWCDebugHandler::Get()->GetProperty(ENABLE_DEFAULT_COLOR_MODE,
-                                      &default_mode_status_);
 
-  int drop_refresh = 0;
-  HWCDebugHandler::Get()->GetProperty(ENABLE_DROP_REFRESH, &drop_refresh);
-  enable_drop_refresh_ = (drop_refresh == 1);
-  if (enable_drop_refresh_) {
+  int optimize_refresh = 0;
+  HWCDebugHandler::Get()->GetProperty(ENABLE_OPTIMIZE_REFRESH, &optimize_refresh);
+  enable_optimize_refresh_ = (optimize_refresh == 1);
+  if (enable_optimize_refresh_) {
     DLOGI("Drop redundant drawcycles %d", id_);
   }
+
+  is_primary_ = display_intf_->IsPrimaryDisplay();
 
   return status;
 }
@@ -138,7 +138,7 @@ HWC2::Error HWCDisplayBuiltIn::Validate(uint32_t *out_num_types, uint32_t *out_n
 
   DTRACE_SCOPED();
 
-  if (display_paused_) {
+  if (display_paused_ || (!is_primary_ && active_secure_sessions_[kSecureDisplay])) {
     MarkLayersForGPUBypass();
     return status;
   }
@@ -181,10 +181,23 @@ HWC2::Error HWCDisplayBuiltIn::Validate(uint32_t *out_num_types, uint32_t *out_n
   }
 
   uint32_t refresh_rate = GetOptimalRefreshRate(one_updating_layer);
-  bool final_rate = force_refresh_rate_ ? true : false;
-  error = display_intf_->SetRefreshRate(refresh_rate, final_rate);
+  error = display_intf_->SetRefreshRate(refresh_rate, force_refresh_rate_);
+
+  // Get the refresh rate set.
+  display_intf_->GetRefreshRate(&refresh_rate);
+  bool vsync_source = (callbacks_->GetVsyncSource() == id_);
+
   if (error == kErrorNone) {
-    // On success, set current refresh rate to new refresh rate
+    if (vsync_source && (current_refresh_rate_ < refresh_rate)) {
+      DTRACE_BEGIN("HWC2::Vsync::Enable");
+      // Display is ramping up from idle.
+      // Client realizes need for resync upon change in config.
+      // Since we know config has changed, triggering vsync proactively
+      // can help in reducing pipeline delays to enable events.
+      SetVsyncEnabled(HWC2::Vsync::Enable);
+      DTRACE_END();
+    }
+    // On success, set current refresh rate to new refresh rate.
     current_refresh_rate_ = refresh_rate;
   }
 
@@ -222,7 +235,7 @@ bool HWCDisplayBuiltIn::CanSkipCommit() {
   }
 
   bool vsync_source = (callbacks_->GetVsyncSource() == id_);
-  bool skip_commit = enable_drop_refresh_ && !pending_commit_ && !buffers_latched &&
+  bool skip_commit = enable_optimize_refresh_ && !pending_commit_ && !buffers_latched &&
                      !pending_refresh_ && !vsync_source;
   pending_refresh_ = false;
 
@@ -233,7 +246,10 @@ HWC2::Error HWCDisplayBuiltIn::Present(int32_t *out_retire_fence) {
   auto status = HWC2::Error::None;
 
   DTRACE_SCOPED();
-  if (display_paused_) {
+
+  if (!is_primary_ && active_secure_sessions_[kSecureDisplay]) {
+      return status;
+  } else if (display_paused_) {
     DisplayError error = display_intf_->Flush(&layer_stack_);
     validated_ = false;
     if (error != kErrorNone) {
@@ -353,8 +369,13 @@ HWC2::Error HWCDisplayBuiltIn::SetColorTransform(const float *matrix,
 }
 
 HWC2::Error HWCDisplayBuiltIn::SetReadbackBuffer(const native_handle_t *buffer,
-                                                 int32_t acquire_fence,
-                                                 bool post_processed_output) {
+                                                 int32_t acquire_fence, bool post_processed_output,
+                                                 CWBClient client) {
+  if (cwb_client_ != client && cwb_client_ != kCWBClientNone) {
+    DLOGE("CWB is in use with client = %d", cwb_client_);
+    return HWC2::Error::NoResources;
+  }
+
   const private_handle_t *handle = reinterpret_cast<const private_handle_t *>(buffer);
   if (!handle || (handle->fd < 0)) {
     return HWC2::Error::BadParameter;
@@ -376,6 +397,7 @@ HWC2::Error HWCDisplayBuiltIn::SetReadbackBuffer(const native_handle_t *buffer,
   readback_buffer_queued_ = true;
   readback_configured_ = false;
   validated_ = false;
+  cwb_client_ = client;
 
   return HWC2::Error::None;
 }
@@ -394,6 +416,7 @@ HWC2::Error HWCDisplayBuiltIn::GetReadbackBufferFence(int32_t *release_fence) {
   readback_buffer_queued_ = false;
   readback_configured_ = false;
   output_buffer_ = {};
+  cwb_client_ = kCWBClientNone;
 
   return status;
 }
@@ -576,6 +599,10 @@ int HWCDisplayBuiltIn::HandleSecureSession(const std::bitset<kSecureMax> &secure
     return -EINVAL;
   }
 
+  if (!is_primary_) {
+    return HWCDisplay::HandleSecureSession(secure_sessions, power_on_pending);
+  }
+
   if (current_power_mode_ != HWC2::PowerMode::On) {
     return 0;
   }
@@ -589,9 +616,9 @@ int HWCDisplayBuiltIn::HandleSecureSession(const std::bitset<kSecureMax> &secure
       return err;
     }
 
-    DLOGI("SecureDisplay state changed from %d to %d for display %d",
+    DLOGI("SecureDisplay state changed from %d to %d for display %d-%d",
           active_secure_sessions_.test(kSecureDisplay), secure_sessions.test(kSecureDisplay),
-          type_);
+          id_, type_);
   }
   active_secure_sessions_ = secure_sessions;
   *power_on_pending = false;
@@ -620,14 +647,6 @@ uint32_t HWCDisplayBuiltIn::GetOptimalRefreshRate(bool one_updating_layer) {
   }
 
   return max_refresh_rate_;
-}
-
-DisplayError HWCDisplayBuiltIn::Refresh() {
-  DisplayError error = kErrorNone;
-
-  callbacks_->Refresh(id_);
-
-  return error;
 }
 
 void HWCDisplayBuiltIn::SetIdleTimeoutMs(uint32_t timeout_ms) {
@@ -659,43 +678,45 @@ void HWCDisplayBuiltIn::HandleFrameCapture() {
   post_processed_output_ = false;
   readback_configured_ = false;
   output_buffer_ = {};
+  cwb_client_ = kCWBClientNone;
 }
 
 void HWCDisplayBuiltIn::HandleFrameDump() {
-  if (!readback_configured_) {
-    dump_frame_count_ = 0;
-  }
+  if (dump_frame_count_) {
+    int ret = 0;
+    if (output_buffer_.release_fence_fd >= 0) {
+      ret = sync_wait(output_buffer_.release_fence_fd, 1000);
+      if (ret < 0) {
+        DLOGE("sync_wait error errno = %d, desc = %s", errno, strerror(errno));
+      }
+      ::close(output_buffer_.release_fence_fd);
+      output_buffer_.release_fence_fd = -1;
+    }
 
-  if (dump_frame_count_ && output_buffer_.release_fence_fd >= 0) {
-    int ret = sync_wait(output_buffer_.release_fence_fd, 1000);
-    ::close(output_buffer_.release_fence_fd);
-    output_buffer_.release_fence_fd = -1;
-    if (ret < 0) {
-      DLOGE("sync_wait error errno = %d, desc = %s", errno, strerror(errno));
-    } else {
-      DumpOutputBuffer(output_buffer_info_, output_buffer_base_, layer_stack_.retire_fence_fd);
+    if (!ret) {
+       DumpOutputBuffer(output_buffer_info_, output_buffer_base_, layer_stack_.retire_fence_fd);
+       validated_ = false;
+     }
+
+    if (0 == (dump_frame_count_ - 1)) {
+      dump_output_to_file_ = false;
+      // Unmap and Free buffer
+      if (munmap(output_buffer_base_, output_buffer_info_.alloc_buffer_info.size) != 0) {
+        DLOGE("unmap failed with err %d", errno);
+      }
+      if (buffer_allocator_->FreeBuffer(&output_buffer_info_) != 0) {
+        DLOGE("FreeBuffer failed");
+      }
+
       readback_buffer_queued_ = false;
-      validated_ = false;
-    }
-  }
+      post_processed_output_ = false;
+      readback_configured_ = false;
 
-  if (0 == dump_frame_count_) {
-    dump_output_to_file_ = false;
-    // Unmap and Free buffer
-    if (munmap(output_buffer_base_, output_buffer_info_.alloc_buffer_info.size) != 0) {
-      DLOGE("unmap failed with err %d", errno);
+      output_buffer_ = {};
+      output_buffer_info_ = {};
+      output_buffer_base_ = nullptr;
+      cwb_client_ = kCWBClientNone;
     }
-    if (buffer_allocator_->FreeBuffer(&output_buffer_info_) != 0) {
-      DLOGE("FreeBuffer failed");
-    }
-
-    readback_buffer_queued_ = false;
-    post_processed_output_ = false;
-    readback_configured_ = false;
-
-    output_buffer_ = {};
-    output_buffer_info_ = {};
-    output_buffer_base_ = nullptr;
   }
 }
 
@@ -704,6 +725,14 @@ HWC2::Error HWCDisplayBuiltIn::SetFrameDumpConfig(uint32_t count, uint32_t bit_m
   HWCDisplay::SetFrameDumpConfig(count, bit_mask_layer_type, format, post_processed);
   dump_output_to_file_ = bit_mask_layer_type & (1 << OUTPUT_LAYER_DUMP);
   DLOGI("output_layer_dump_enable %d", dump_output_to_file_);
+
+  if (dump_output_to_file_) {
+    if (cwb_client_ != kCWBClientNone) {
+      DLOGE("CWB is in use with client = %d", cwb_client_);
+      dump_output_to_file_ = false;
+      return HWC2::Error::NoResources;
+    }
+  }
 
   if (!count || !dump_output_to_file_ || (output_buffer_info_.alloc_buffer_info.fd >= 0)) {
     return HWC2::Error::None;
@@ -740,13 +769,18 @@ HWC2::Error HWCDisplayBuiltIn::SetFrameDumpConfig(uint32_t count, uint32_t bit_m
 
   output_buffer_base_ = buffer;
   const native_handle_t *handle = static_cast<native_handle_t *>(output_buffer_info_.private_data);
-  SetReadbackBuffer(handle, -1, post_processed);
+  SetReadbackBuffer(handle, -1, post_processed, kCWBClientFrameDump);
 
   return HWC2::Error::None;
 }
 
 int HWCDisplayBuiltIn::FrameCaptureAsync(const BufferInfo &output_buffer_info,
                                          bool post_processed_output) {
+  if (cwb_client_ != kCWBClientNone) {
+    DLOGE("CWB is in use with client = %d", cwb_client_);
+    return -1;
+  }
+
   // Note: This function is called in context of a binder thread and a lock is already held
   if (output_buffer_info.alloc_buffer_info.fd < 0) {
     DLOGE("Invalid fd %d", output_buffer_info.alloc_buffer_info.fd);
@@ -772,7 +806,7 @@ int HWCDisplayBuiltIn::FrameCaptureAsync(const BufferInfo &output_buffer_info,
   }
 
   const native_handle_t *buffer = static_cast<native_handle_t *>(output_buffer_info.private_data);
-  SetReadbackBuffer(buffer, -1, post_processed_output);
+  SetReadbackBuffer(buffer, -1, post_processed_output, kCWBClientColor);
   frame_capture_buffer_queued_ = true;
   frame_capture_status_ = -EAGAIN;
 
@@ -815,6 +849,7 @@ DisplayError HWCDisplayBuiltIn::DisablePartialUpdateOneFrame() {
 
 DisplayError HWCDisplayBuiltIn::SetMixerResolution(uint32_t width, uint32_t height) {
   DisplayError error = display_intf_->SetMixerResolution(width, height);
+  callbacks_->Refresh(id_);
   validated_ = false;
   return error;
 }
@@ -844,15 +879,11 @@ DisplayError HWCDisplayBuiltIn::ControlIdlePowerCollapse(bool enable, bool synch
 }
 
 DisplayError HWCDisplayBuiltIn::SetDynamicDSIClock(uint64_t bitclk) {
-  {
-    SEQUENCE_WAIT_SCOPE_LOCK(HWCSession::locker_[type_]);
-    DisablePartialUpdateOneFrame();
-
-    DisplayError error = display_intf_->SetDynamicDSIClock(bitclk);
-    if (error != kErrorNone) {
-      DLOGE(" failed: Clk: %llu Error: %d", bitclk, error);
-      return error;
-    }
+  DisablePartialUpdateOneFrame();
+  DisplayError error = display_intf_->SetDynamicDSIClock(bitclk);
+  if (error != kErrorNone) {
+    DLOGE(" failed: Clk: %llu Error: %d", bitclk, error);
+    return error;
   }
 
   callbacks_->Refresh(id_);
@@ -862,7 +893,6 @@ DisplayError HWCDisplayBuiltIn::SetDynamicDSIClock(uint64_t bitclk) {
 }
 
 DisplayError HWCDisplayBuiltIn::GetDynamicDSIClock(uint64_t *bitclk) {
-  SEQUENCE_WAIT_SCOPE_LOCK(HWCSession::locker_[type_]);
   if (display_intf_) {
     return display_intf_->GetDynamicDSIClock(bitclk);
   }
@@ -905,4 +935,19 @@ HWC2::Error HWCDisplayBuiltIn::GetPanelBrightness(float *brightness) {
 
   return HWC2::Error::None;
 }
+
+HWC2::Error HWCDisplayBuiltIn::SetBLScale(uint32_t level) {
+  DisplayError ret = display_intf_->SetBLScale(level);
+  if (ret != kErrorNone) {
+    return HWC2::Error::NoResources;
+  }
+  return HWC2::Error::None;
+}
+
+HWC2::Error HWCDisplayBuiltIn::UpdatePowerMode(HWC2::PowerMode mode) {
+  current_power_mode_ = mode;
+  validated_ = false;
+  return HWC2::Error::None;
+}
+
 }  // namespace sdm

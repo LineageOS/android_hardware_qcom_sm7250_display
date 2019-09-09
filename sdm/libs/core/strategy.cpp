@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2014 - 2018, The Linux Foundation. All rights reserved.
+* Copyright (c) 2014 - 2019, The Linux Foundation. All rights reserved.
 *
 * Redistribution and use in source and binary forms, with or without modification, are permitted
 * provided that the following conditions are met:
@@ -80,10 +80,18 @@ DisplayError Strategy::Deinit() {
   return kErrorNone;
 }
 
-DisplayError Strategy::Start(HWLayersInfo *hw_layers_info, uint32_t *max_attempts,
-                             const PUConstraints &pu_constraints) {
-  DisplayError error = kErrorNone;
+void Strategy::GenerateROI(HWLayersInfo *hw_layers_info, const PUConstraints &pu_constraints) {
+  hw_layers_info_ = hw_layers_info;
 
+  if (partial_update_intf_) {
+    partial_update_intf_->Start(pu_constraints);
+  }
+
+  return GenerateROI();
+}
+
+DisplayError Strategy::Start(HWLayersInfo *hw_layers_info, uint32_t *max_attempts) {
+  DisplayError error = kErrorNone;
   hw_layers_info_ = hw_layers_info;
   extn_start_success_ = false;
 
@@ -91,11 +99,6 @@ DisplayError Strategy::Start(HWLayersInfo *hw_layers_info, uint32_t *max_attempt
     DLOGE("GPU composition is enabled and GPU target buffer not provided.");
     return kErrorNotSupported;
   }
-
-  if (partial_update_intf_) {
-    partial_update_intf_->Start(pu_constraints);
-  }
-  GenerateROI();
 
   if (strategy_intf_) {
     error = strategy_intf_->Start(hw_layers_info_, max_attempts);
@@ -268,6 +271,13 @@ DisplayError Strategy::SetBlendSpace(const PrimariesTransfer &blend_space) {
     return strategy_intf_->SetBlendSpace(blend_space);
   }
   return kErrorNotSupported;
+}
+
+bool Strategy::CanSkipValidate() {
+  if (strategy_intf_) {
+    return strategy_intf_->CanSkipValidate();
+  }
+  return true;
 }
 
 }  // namespace sdm
