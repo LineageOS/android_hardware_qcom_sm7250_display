@@ -78,6 +78,7 @@ public:
         SET_FRAME_TRIGGER_MODE = 46, // Set frame trigger mode for debug
         SET_PANEL_LUMINANCE = 47, // Set Panel Luminance attributes.
         SET_BRIGHTNESS_SCALE = 48,  // Set brightness scale ratio
+        SET_DISPLAY_DEVICE_STATUS = 100, // Set display device status
         COMMAND_LIST_END = 400,
     };
 
