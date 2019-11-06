@@ -67,10 +67,11 @@ class HWPeripheralDRM : public HWDeviceDRM {
   virtual DisplayError GetPanelBrightness(int *level);
   virtual void GetHWPanelMaxBrightness();
   virtual DisplayError SetBLScale(uint32_t level);
+  virtual DisplayError GetPanelBrightnessBasePath(std::string *base_path);
 
  private:
   void SetDestScalarData(const HWLayersInfo &hw_layer_info);
-  void ResetDisplayParams();
+  void ResetDestScalarCache();
   DisplayError SetupConcurrentWritebackModes();
   void SetupConcurrentWriteback(const HWLayersInfo &hw_layer_info, bool validate);
   void ConfigureConcurrentWriteback(LayerStack *stack);
@@ -79,7 +80,7 @@ class HWPeripheralDRM : public HWDeviceDRM {
     drm_atomic_intf_->Perform(sde_drm::DRMOps::CRTC_SET_IDLE_PC_STATE, token_.crtc_id,
                               idle_pc_state_);
   }
-  void CacheDestScalarData(const HWLayersInfo &hw_layer_info);
+  void CacheDestScalarData();
 
   struct DestScalarCache {
     SDEScaler scalar_data = {};
