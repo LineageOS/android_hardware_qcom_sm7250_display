@@ -86,6 +86,7 @@ DisplayError DisplayBuiltIn::Init() {
   if (hw_panel_info_.mode == kModeCommand) {
     event_list_ = {HWEvent::VSYNC,
                    HWEvent::EXIT,
+                   HWEvent::IDLE_NOTIFY,
                    HWEvent::SHOW_BLANK_EVENT,
                    HWEvent::THERMAL_LEVEL,
                    HWEvent::IDLE_POWER_COLLAPSE,
@@ -227,6 +228,10 @@ DisplayError DisplayBuiltIn::Commit(LayerStack *layer_stack) {
     ControlPartialUpdate(true /* enable */, &pending);
   }
 
+  if (dpps_pu_nofiy_pending_) {
+    dpps_pu_nofiy_pending_ = false;
+    dpps_pu_lock_.Broadcast();
+  }
   dpps_info_.Init(this, hw_panel_info_.panel_name);
 
   return error;
@@ -285,6 +290,8 @@ DisplayError DisplayBuiltIn::SetDisplayMode(uint32_t mode) {
             hw_display_mode);
       return error;
     }
+
+    DisplayBase::ReconfigureDisplay();
 
     if (mode == kModeVideo) {
       ControlPartialUpdate(false /* enable */, &pending);
@@ -392,6 +399,11 @@ DisplayError DisplayBuiltIn::SetRefreshRate(uint32_t refresh_rate, bool final_ra
       // Attempt to update refresh rate can fail if rf interfenence is detected.
       // Just drop min fps settting for now.
       handle_idle_timeout_ = false;
+      return error;
+    }
+
+    error = comp_manager_->CheckEnforceSplit(display_comp_ctx_, refresh_rate);
+    if (error != kErrorNone) {
       return error;
     }
   }
@@ -559,7 +571,8 @@ DisplayError DisplayBuiltIn::DppsProcessOps(enum DppsOps op, void *payload, size
     case kDppsScreenRefresh:
       event_handler_->Refresh();
       break;
-    case kDppsPartialUpdate:
+    case kDppsPartialUpdate: {
+      int ret;
       if (!payload) {
         DLOGE("Invalid payload parameter for op %d", op);
         error = kErrorParameters;
@@ -567,7 +580,19 @@ DisplayError DisplayBuiltIn::DppsProcessOps(enum DppsOps op, void *payload, size
       }
       enable = *(reinterpret_cast<bool *>(payload));
       ControlPartialUpdate(enable, &pending);
+      event_handler_->HandleEvent(kInvalidateDisplay);
+      event_handler_->Refresh();
+      {
+         lock_guard<recursive_mutex> obj(recursive_mutex_);
+         dpps_pu_nofiy_pending_ = true;
+      }
+      ret = dpps_pu_lock_.WaitFinite(kPuTimeOutMs);
+      if (ret) {
+        DLOGE("failed to %s partial update ret %d", ((enable) ? "enable" : "disable"), ret);
+        error = kErrorTimeOut;
+      }
       break;
+    }
     case kDppsRequestCommit:
       if (!payload) {
         DLOGE("Invalid payload parameter for op %d", op);
@@ -591,6 +616,11 @@ DisplayError DisplayBuiltIn::DppsProcessOps(enum DppsOps op, void *payload, size
       info->is_primary = IsPrimaryDisplay();
       info->display_id = display_id_;
       info->display_type = display_type_;
+
+      error = hw_intf_->GetPanelBrightnessBasePath(&(info->brightness_base_path));
+      if (error != kErrorNone) {
+        DLOGE("Failed to get brightness base path %d", error);
+      }
       break;
     default:
       DLOGE("Invalid input op %d", op);
