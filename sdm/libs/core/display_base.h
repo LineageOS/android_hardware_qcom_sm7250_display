@@ -156,6 +156,7 @@ class DisplayBase : public DisplayInterface {
   virtual DisplayError GetRefreshRate(uint32_t *refresh_rate) { return kErrorNotSupported; }
   virtual bool CanSkipValidate();
   virtual DisplayError SetBLScale(uint32_t level) { return kErrorNotSupported; }
+  virtual bool CheckResourceState();
 
  protected:
   const char *kBt2020Pq = "bt2020_pq";
@@ -244,6 +245,8 @@ class DisplayBase : public DisplayInterface {
   bool vsync_enable_pending_ = false;
   bool pending_doze_ = false;
   bool pending_power_on_ = false;
+  QSyncMode qsync_mode_ = kQSyncModeNone;
+  bool needs_avr_update_ = false;
 
   static Locker display_power_reset_lock_;
   static bool display_power_reset_pending_;
