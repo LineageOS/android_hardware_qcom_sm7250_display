@@ -65,6 +65,8 @@ class DisplayBuiltIn : public DisplayBase, HWEventHandler, DppsPropIntf {
   virtual DisplayError DisablePartialUpdateOneFrame();
   virtual DisplayError SetDisplayState(DisplayState state, bool teardown,
                                        int *release_fence);
+  virtual DisplayError SetActiveConfig(uint32_t index) override;
+  virtual DisplayError GetActiveConfig(uint32_t *index) override;
   virtual void SetIdleTimeoutMs(uint32_t active_ms);
   virtual DisplayError SetDisplayMode(uint32_t mode);
   virtual DisplayError GetRefreshRateRange(uint32_t *min_refresh_rate, uint32_t *max_refresh_rate);
@@ -120,6 +122,8 @@ class DisplayBuiltIn : public DisplayBase, HWEventHandler, DppsPropIntf {
   LayerRect right_frame_roi_ = {};
   Locker dpps_pu_lock_;
   bool dpps_pu_nofiy_pending_ = false;
+
+  uint32_t pendingActiveConfig = UINT_MAX;
 };
 
 }  // namespace sdm
