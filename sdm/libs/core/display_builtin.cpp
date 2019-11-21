@@ -243,9 +243,36 @@ DisplayError DisplayBuiltIn::SetDisplayState(DisplayState state, bool teardown,
   // Set vsync enable state to false, as driver disables vsync during display power off.
   if (state == kStateOff) {
     vsync_enable_ = false;
+  } else if (state == kStateOn && pendingActiveConfig != UINT_MAX) {
+    DisplayBase::SetActiveConfig(pendingActiveConfig);
+    pendingActiveConfig = UINT_MAX;
   }
 
   return kErrorNone;
+}
+
+DisplayError DisplayBuiltIn::SetActiveConfig(uint32_t index) {
+  lock_guard<recursive_mutex> obj(recursive_mutex_);
+  DisplayState state;
+
+  if (DisplayBase::GetDisplayState(&state) == kErrorNone) {
+    if (state != kStateOn) {
+      pendingActiveConfig = index;
+      return kErrorNone;
+    }
+  }
+
+  pendingActiveConfig = UINT_MAX;
+  return DisplayBase::SetActiveConfig(index);
+}
+
+DisplayError DisplayBuiltIn::GetActiveConfig(uint32_t *index) {
+  lock_guard<recursive_mutex> obj(recursive_mutex_);
+  if (index && pendingActiveConfig != UINT_MAX) {
+    *index = pendingActiveConfig;
+    return kErrorNone;
+  }
+  return DisplayBase::GetActiveConfig(index);
 }
 
 void DisplayBuiltIn::SetIdleTimeoutMs(uint32_t active_ms) {
