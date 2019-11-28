@@ -11,11 +11,11 @@ LOCAL_C_INCLUDES              += $(TARGET_OUT_INTERMEDIATES)/KERNEL_OBJ/usr/incl
 LOCAL_HEADER_LIBRARIES        := display_headers
 LOCAL_CFLAGS                  := -fno-operator-names -Wno-unused-parameter -DLOG_TAG=\"SDM\" \
                                  $(common_flags)
-LOCAL_SHARED_LIBRARIES        := libdl libdisplaydebug libsdmutils libsdedrm
+LOCAL_SHARED_LIBRARIES        := libdl libdisplaydebug libsdmutils
 
 ifneq ($(TARGET_IS_HEADLESS), true)
     LOCAL_CFLAGS              += -isystem external/libdrm
-    LOCAL_SHARED_LIBRARIES    += libdrm libdrmutils
+    LOCAL_SHARED_LIBRARIES    += libdrm libdrmutils libsdedrm
     LOCAL_HW_INTF_PATH_2      := drm
 endif
 
@@ -75,6 +75,5 @@ LOCAL_COPY_HEADERS             = $(SDM_HEADER_PATH)/private/color_interface.h \
                                  $(SDM_HEADER_PATH)/private/hw_info_types.h \
                                  $(SDM_HEADER_PATH)/private/partial_update_interface.h \
                                  $(SDM_HEADER_PATH)/private/resource_interface.h \
-                                 $(SDM_HEADER_PATH)/private/strategy_interface.h \
-                                 $(SDM_HEADER_PATH)/private/dpps_control_interface.h
+                                 $(SDM_HEADER_PATH)/private/strategy_interface.h
 include $(BUILD_COPY_HEADERS)
