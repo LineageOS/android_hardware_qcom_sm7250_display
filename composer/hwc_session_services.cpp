@@ -70,6 +70,11 @@ int MapDisplayType(IDisplayConfig::DisplayType dpy) {
   return -EINVAL;
 }
 
+bool WaitForResourceNeeded(HWC2::PowerMode prev_mode, HWC2::PowerMode new_mode) {
+  return ((prev_mode == HWC2::PowerMode::Off) &&
+          (new_mode == HWC2::PowerMode::On || new_mode == HWC2::PowerMode::Doze));
+}
+
 HWCDisplay::DisplayStatus MapExternalStatus(IDisplayConfig::DisplayExternalStatus status) {
   switch (status) {
     case IDisplayConfig::DisplayExternalStatus::EXTERNAL_OFFLINE:
@@ -139,7 +144,7 @@ int32_t HWCSession::SetSecondaryDisplayStatus(int disp_id, HWCDisplay::DisplaySt
 
   if (status == HWCDisplay::kDisplayStatusResume || status == HWCDisplay::kDisplayStatusPause) {
     hwc2_display_t active_builtin_disp_id = GetActiveBuiltinDisplay();
-    if (active_builtin_disp_id < HWCCallbacks::kNumDisplays) {
+    if (active_builtin_disp_id < HWCCallbacks::kNumRealDisplays) {
       {
         SEQUENCE_WAIT_SCOPE_LOCK(locker_[active_builtin_disp_id]);
         hwc_display_[active_builtin_disp_id]->ResetValidation();
@@ -644,6 +649,10 @@ Return<int32_t> HWCSession::setPowerMode(uint32_t disp_id, PowerMode power_mode)
     return 0;
   }
 
+  // Active builtin display needs revalidation
+  hwc2_display_t active_builtin_disp_id = GetActiveBuiltinDisplay();
+  HWC2::PowerMode previous_mode = hwc_display_[disp_id]->GetCurrentPowerMode();
+
   DLOGI("disp_id: %d power_mode: %d", disp_id, power_mode);
   HWCDisplay::HWCLayerStack stack = {};
   hwc2_display_t dummy_disp_id = map_hwc_display_.at(disp_id);
@@ -683,6 +692,13 @@ Return<int32_t> HWCSession::setPowerMode(uint32_t disp_id, PowerMode power_mode)
   locker_[dummy_disp_id].Unlock();  // Release the dummy display.
   locker_[disp_id].Unlock();        // Release the real display.
   power_state_[disp_id].Unlock();   // Release the display's power-state transition var read lock.
+
+  HWC2::PowerMode new_mode = hwc_display_[disp_id]->GetCurrentPowerMode();
+  if (active_builtin_disp_id < HWCCallbacks::kNumRealDisplays &&
+      hwc_display_[disp_id]->IsFirstCommitDone() &&
+      WaitForResourceNeeded(previous_mode, new_mode)) {
+    WaitForResources(true, active_builtin_disp_id, disp_id);
+  }
 
   return 0;
 }
@@ -739,7 +755,7 @@ Return<void> HWCSession::getDebugProperty(const hidl_string &prop_name,
   int32_t error = -EINVAL;
 
   vendor_prop_name += prop_name.c_str();
-  if (HWCDebugHandler::Get()->GetProperty(vendor_prop_name.c_str(), value) != kErrorNone) {
+  if (HWCDebugHandler::Get()->GetProperty(vendor_prop_name.c_str(), value) == kErrorNone) {
     result = value;
     error = 0;
   }
@@ -901,6 +917,16 @@ Return<int32_t> HWCSession::setCWBOutputBuffer(const sp<IDisplayCWBCallback> &ca
     return -1;
   }
 
+  // Output buffer dump is not supported, if External or Virtual display is present.
+  int external_dpy_index = GetDisplayIndex(qdutils::DISPLAY_EXTERNAL);
+  int virtual_dpy_index = GetDisplayIndex(qdutils::DISPLAY_VIRTUAL);
+
+  if (((external_dpy_index != -1) && hwc_display_[external_dpy_index]) ||
+      ((virtual_dpy_index != -1) && hwc_display_[virtual_dpy_index])) {
+    DLOGW("Output buffer dump is not supported with External or Virtual display!");
+    return -1;
+  }
+
   // Mutex scope
   {
     SCOPE_LOCK(locker_[HWC_DISPLAY_PRIMARY]);
@@ -911,6 +937,20 @@ Return<int32_t> HWCSession::setCWBOutputBuffer(const sp<IDisplayCWBCallback> &ca
   }
 
   return cwb_.PostBuffer(callback, post_processed, buffer);
+}
+
+Return<bool> HWCSession::isSmartPanelConfig(uint32_t disp_id, uint32_t config_id) {
+  if (disp_id != qdutils::DISPLAY_PRIMARY) {
+    return false;
+  }
+
+  SCOPE_LOCK(locker_[disp_id]);
+  if (!hwc_display_[disp_id]) {
+    DLOGE("Display %d is not created yet.", disp_id);
+    return false;
+  }
+
+  return hwc_display_[disp_id]->IsSmartPanelConfig(config_id);
 }
 
 int32_t HWCSession::CWB::PostBuffer(const sp<IDisplayCWBCallback> &callback, bool post_processed,
@@ -1027,6 +1067,63 @@ void HWCSession::CWB::PresentDisplayDone(hwc2_display_t disp_id) {
 
   std::unique_lock<std::mutex> lock(mutex_);
   cv_.notify_one();
+}
+
+Return<int32_t> HWCSession::setQsyncMode(uint32_t disp_id, IDisplayConfig::QsyncMode mode) {
+  SEQUENCE_WAIT_SCOPE_LOCK(locker_[disp_id]);
+  if (!hwc_display_[disp_id]) {
+    return -1;
+  }
+
+  QSyncMode qsync_mode = kQSyncModeNone;
+  switch (mode) {
+    case IDisplayConfig::QsyncMode::NONE:
+      qsync_mode = kQSyncModeNone;
+      break;
+    case IDisplayConfig::QsyncMode::WAIT_FOR_FENCES_ONE_FRAME:
+      qsync_mode = kQsyncModeOneShot;
+      break;
+    case IDisplayConfig::QsyncMode::WAIT_FOR_FENCES_EACH_FRAME:
+      qsync_mode = kQsyncModeOneShotContinuous;
+      break;
+    case IDisplayConfig::QsyncMode::WAIT_FOR_COMMIT_EACH_FRAME:
+      qsync_mode = kQSyncModeContinuous;
+      break;
+  }
+
+  hwc_display_[disp_id]->SetQSyncMode(qsync_mode);
+  return 0;
+}
+
+Return<bool> HWCSession::isAsyncVDSCreationSupported() {
+  if (!async_vds_creation_) {
+    return false;
+  }
+
+  return true;
+}
+
+Return<int32_t> HWCSession::createVirtualDisplay(uint32_t width, uint32_t height, int32_t format) {
+  if (!async_vds_creation_) {
+    return HWC2_ERROR_UNSUPPORTED;
+  }
+
+  if (!width || !height) {
+    return HWC2_ERROR_BAD_PARAMETER;
+  }
+
+  hwc2_display_t active_builtin_disp_id = GetActiveBuiltinDisplay();
+  auto status = CreateVirtualDisplayObj(width, height, &format, &virtual_id_);
+  if (status == HWC2::Error::None) {
+    DLOGI("Created virtual display id:% " PRIu64 ", res: %dx%d", virtual_id_, width, height);
+    if (active_builtin_disp_id < HWCCallbacks::kNumRealDisplays) {
+      WaitForResources(true, active_builtin_disp_id, virtual_id_);
+    }
+  } else {
+    DLOGE("Failed to create virtual display: %s", to_string(status).c_str());
+  }
+
+  return INT32(status);
 }
 
 }  // namespace sdm

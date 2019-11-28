@@ -36,9 +36,12 @@
 #include <set>
 #include <string>
 #include <vector>
+#include <utility>
 
 namespace sdm {
 using std::string;
+using std::pair;
+using std::vector;
 
 const int kMaxSDELayers = 16;   // Maximum number of layers that can be handled by MDP5 hardware
                                 // in a given layer stack.
@@ -128,6 +131,7 @@ enum HWPipeFlags {
 };
 
 enum HWAVRModes {
+  kQsyncNone,       // Disables Qsync.
   kContinuousMode,  // Mode to enable AVR feature for every frame.
   kOneShotMode,     // Mode to enable AVR feature for particular frame.
 };
@@ -265,6 +269,12 @@ struct InlineRotationInfo {
   float max_downscale_rt = 2.2f;    // max downscale real time display
 };
 
+
+const int  kPipeVigLimit       = (1 << 0);
+const int  kPipeDmaLimit       = (1 << 1);
+const int  kPipeScalingLimit   = (1 << 2);
+const int  kPipeRotationLimit  = (1 << 3);
+
 struct HWResourceInfo {
   uint32_t hw_version = 0;
   uint32_t num_dma_pipe = 0;
@@ -320,6 +330,9 @@ struct HWResourceInfo {
   InlineRotationInfo inline_rot_info;
   std::bitset<32> src_tone_map = 0;  //!< Stores the bit mask of src tone map capability
   int secure_disp_blend_stage = -1;
+  uint32_t line_width_constraints_count = 0;
+  vector< pair <uint32_t, uint32_t> > line_width_limits;
+  vector< pair <uint32_t, uint32_t> > line_width_constraints;
 };
 
 struct HWSplitInfo {
@@ -563,7 +576,7 @@ struct HWDestScaleInfo {
 typedef std::map<uint32_t, HWDestScaleInfo *> DestScaleInfoMap;
 
 struct HWAVRInfo {
-  bool enable = false;                // Flag to Enable AVR feature
+  bool update = false;                // Update avr setting.
   HWAVRModes mode = kContinuousMode;  // Specifies the AVR mode
 };
 
@@ -666,6 +679,7 @@ struct HWLayersInfo {
   DestScaleInfoMap dest_scale_info_map = {};
   HWHDRLayerInfo hdr_layer_info = {};
   Handle pvt_data = NULL;   // Private data used by sdm extension only.
+  bool game_present = false;  // Indicates there is game layer or not
 };
 
 struct HWQosData {

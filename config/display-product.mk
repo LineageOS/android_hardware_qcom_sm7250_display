@@ -11,6 +11,8 @@ PRODUCT_PACKAGES += \
     lights.$(TARGET_BOARD_PLATFORM) \
     hwcomposer.$(TARGET_BOARD_PLATFORM) \
     memtrack.$(TARGET_BOARD_PLATFORM) \
+    libsdmcore \
+    libsdmutils \
     libqdMetaData \
     libdisplayconfig.vendor \
     vendor.display.config@1.0.vendor \
@@ -24,6 +26,9 @@ PRODUCT_PACKAGES += \
     vendor.display.config@1.8.vendor \
     vendor.display.config@1.9.vendor \
     vendor.display.config@1.10.vendor \
+    vendor.display.config@1.11.vendor \
+    vendor.display.config@1.12.vendor \
+    vendor.display.config@1.13.vendor \
     vendor.qti.hardware.display.mapper@2.0.vendor \
     vendor.qti.hardware.display.mapper@3.0.vendor \
     modetest
@@ -54,6 +59,7 @@ PRODUCT_PROPERTY_OVERRIDES += \
     debug.sf.early_gl_app_phase_offset_ns=15000000 \
     debug.sf.high_fps_early_phase_offset_ns=6100000 \
     debug.sf.high_fps_early_gl_phase_offset_ns=9000000 \
+    debug.sf.high_fps_late_app_phase_offset_ns=1000000 \
     debug.sf.phase_offset_threshold_for_next_vsync_ns=6100000
 endif
 
