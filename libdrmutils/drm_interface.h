@@ -152,6 +152,12 @@ enum struct DRMOps {
    */
   PLANE_SET_MULTIRECT_MODE,
   /*
+   * Op: Sets sspp layout on this plane.
+   * Arg: uint32_t - Plane ID
+   *      uint32_t - SSPP Layout Index
+   */
+  PLANE_SET_SSPP_LAYOUT,
+  /*
    * Op: Sets rotator output frame buffer ID for plane.
    * Arg: uint32_t - Plane ID
    *      uint32_t - Framebuffer ID
@@ -519,6 +525,8 @@ struct DRMCrtcInfo {
   uint32_t rotation_limit_index = 0;
   uint32_t line_width_constraints_count = 0;
   std::vector< std::pair <uint32_t, uint32_t> > line_width_limits;
+  uint32_t num_mnocports;
+  uint32_t mnoc_bus_width;
 };
 
 enum struct DRMPlaneType {
@@ -580,6 +588,9 @@ enum struct DRMTopology {
   DUAL_LM_MERGE,
   DUAL_LM_MERGE_DSC,
   DUAL_LM_DSCMERGE,
+  QUAD_LM_MERGE,
+  QUAD_LM_DSCMERGE,
+  QUAD_LM_MERGE_DSC,
   PPSPLIT,
 };
 
@@ -809,6 +820,12 @@ enum struct DRMMultiRectMode {
   NONE = 0,
   PARALLEL = 1,
   SERIAL = 2,
+};
+
+enum struct DRMSSPPLayoutIndex {
+  NONE = 0,
+  LEFT = 1,
+  RIGHT = 2,
 };
 
 enum struct DRMCWbCaptureMode {

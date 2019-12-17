@@ -44,6 +44,7 @@
 using android::hardware::graphics::common::V1_2::ColorMode;
 using android::hardware::graphics::common::V1_1::Dataspace;
 using android::hardware::graphics::common::V1_1::RenderIntent;
+using android::hardware::graphics::common::V1_2::Hdr;
 
 namespace sdm {
 
@@ -309,6 +310,9 @@ class HWCDisplay : public DisplayEventHandler {
     return HWC2::Error::Unsupported;
   }
   virtual HWC2::Error GetPanelBrightness(float *brightness) {
+    return HWC2::Error::Unsupported;
+  }
+  virtual HWC2::Error GetPanelMaxBrightness(uint32_t *max_brightness_level) {
     return HWC2::Error::Unsupported;
   }
   virtual HWC2::Error GetDisplayConfigs(uint32_t *out_num_configs, hwc2_config_t *out_configs);
