@@ -7,7 +7,7 @@ common_header_export_path := qcom/display
 LOCAL_MODULE              := libsdedrm
 LOCAL_SANITIZE            := integer_overflow
 LOCAL_MODULE_TAGS         := optional
-LOCAL_SHARED_LIBRARIES    := libdrm libdrmutils libdisplaydebug
+LOCAL_SHARED_LIBRARIES    := libdrm libdrmutils libdisplaydebug libcutils
 LOCAL_HEADER_LIBRARIES    := display_headers
 LOCAL_C_INCLUDES          := $(TARGET_OUT_INTERMEDIATES)/KERNEL_OBJ/usr/include/ \
                              -isystem external/libdrm
