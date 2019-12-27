@@ -134,7 +134,8 @@ void QtiComposerClient::onHotplug(hwc2_callback_data_t callbackData, hwc2_displa
   }
 
   auto ret = client->mCallback->onHotplug(display, connect);
-  ALOGE_IF(!ret.isOk(), "failed to send onHotplug: %s", ret.description().c_str());
+  ALOGW_IF(!ret.isOk(), "failed to send onHotplug: %s. SF likely unavailable.",
+           ret.description().c_str());
 
   if (connect == composer_V2_1::IComposerCallback::Connection::DISCONNECTED) {
     // Trigger refresh to make sure disconnect event received/updated properly by SurfaceFlinger.
@@ -152,14 +153,16 @@ void QtiComposerClient::onHotplug(hwc2_callback_data_t callbackData, hwc2_displa
 void QtiComposerClient::onRefresh(hwc2_callback_data_t callbackData, hwc2_display_t display) {
   auto client = reinterpret_cast<QtiComposerClient*>(callbackData);
   auto ret = client->mCallback->onRefresh(display);
-  ALOGE_IF(!ret.isOk(), "failed to send onRefresh: %s", ret.description().c_str());
+  ALOGW_IF(!ret.isOk(), "failed to send onRefresh: %s. SF likely unavailable.",
+           ret.description().c_str());
 }
 
 void QtiComposerClient::onVsync(hwc2_callback_data_t callbackData, hwc2_display_t display,
                                   int64_t timestamp) {
   auto client = reinterpret_cast<QtiComposerClient*>(callbackData);
   auto ret = client->mCallback->onVsync(display, timestamp);
-  ALOGI_IF(!ret.isOk(), "failed to send onVsync: %s", ret.description().c_str());
+  ALOGW_IF(!ret.isOk(), "failed to send onVsync: %s. SF likely unavailable.",
+           ret.description().c_str());
 }
 
 // convert fenceFd to or from hidl_handle
@@ -1724,10 +1727,45 @@ bool QtiComposerClient::CommandReader::parseSetLayerPerFrameMetadataBlobs(uint16
     return false;
   }
 
-  // SetLayerPerFrameMetadataBlobs is not supported
-  auto err = Error::UNSUPPORTED;
-  mWriter.setError(getCommandLoc(), static_cast<Error>(err));
+  uint32_t numBlobs = read();
+  length--;
+  std::vector<IComposerClient::PerFrameMetadataBlob> metadata;
 
+  for (size_t i = 0; i < numBlobs; i++) {
+    IComposerClient::PerFrameMetadataKey key =
+      static_cast<IComposerClient::PerFrameMetadataKey>(readSigned());
+    uint32_t blobSize = read();
+    length -= 2;
+
+    if (length * sizeof(uint32_t) < blobSize) {
+      return false;
+    }
+
+    metadata.push_back({key, std::vector<uint8_t>()});
+    IComposerClient::PerFrameMetadataBlob& metadataBlob = metadata.back();
+    metadataBlob.blob.resize(blobSize);
+    readBlob(blobSize, metadataBlob.blob.data());
+  }
+
+  std::vector<int32_t> keys;
+  std::vector<uint32_t> sizes_of_metablob_;
+  std::vector<uint8_t> blob_of_data_;
+  keys.reserve(metadata.size());
+  sizes_of_metablob_.reserve(metadata.size());
+  for (const auto& m : metadata) {
+    keys.push_back(static_cast<int32_t>(m.key));
+    sizes_of_metablob_.push_back(m.blob.size());
+    for (uint8_t i = 0; i < m.blob.size(); i++) {
+      blob_of_data_.push_back(m.blob[i]);
+    }
+  }
+  auto err = mClient.hwc_session_->SetLayerPerFrameMetadataBlobs(mDisplay, mLayer, metadata.size(),
+                                                                 keys.data(),
+                                                                 sizes_of_metablob_.data(),
+                                                                 blob_of_data_.data());
+  if (static_cast<Error>(err) != Error::NONE) {
+    mWriter.setError(getCommandLoc(), static_cast<Error>(err));
+  }
   return true;
 }
 
