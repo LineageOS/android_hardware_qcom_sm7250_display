@@ -525,7 +525,9 @@ int HWCDisplay::Init() {
   HWCDebugHandler::Get()->GetProperty(DISABLE_FAST_PATH, &disable_fast_path);
   fast_path_enabled_ = !(disable_fast_path == 1);
 
-  DLOGI("Display created with id: %d", id_);
+  game_supported_ = display_intf_->GameEnhanceSupported();
+
+  DLOGI("Display created with id: %d, game_supported_: %d", id_, game_supported_);
 
   return 0;
 }
@@ -785,7 +787,7 @@ void HWCDisplay::BuildLayerStack() {
       layer->update_mask.set(kClientCompRequest);
     }
 
-    if (hwc_layer->GetType() == kLayerGame) {
+    if (game_supported_ && (hwc_layer->GetType() == kLayerGame)) {
       layer->flags.is_game = true;
       layer->input_buffer.flags.game = true;
     }
@@ -799,9 +801,10 @@ void HWCDisplay::BuildLayerStack() {
   bool enforce_geometry_change = (validate_state_ == kInternalValidate) && !validated_;
 
   // TODO(user): Set correctly when SDM supports geometry_changes as bitmask
-  layer_stack_.flags.geometry_changed = UINT32(geometry_changes_ > 0) || enforce_geometry_change;
-  layer_stack_.flags.config_changed = !validated_;
 
+  layer_stack_.flags.geometry_changed = UINT32((geometry_changes_ || enforce_geometry_change ||
+                                                geometry_changes_on_doze_suspend_) > 0);
+  layer_stack_.flags.config_changed = !validated_;
   // Append client target to the layer stack
   Layer *sdm_client_target = client_target_->GetSDMLayer();
   sdm_client_target->flags.updating = IsLayerUpdating(client_target_);
@@ -1335,6 +1338,7 @@ HWC2::Error HWCDisplay::PrepareLayerStack(uint32_t *out_num_types, uint32_t *out
     } else if (error == kErrorPermission) {
       WaitOnPreviousFence();
       MarkLayersForGPUBypass();
+      geometry_changes_on_doze_suspend_ |= geometry_changes_;
     } else {
       DLOGW("Prepare failed. Error = %d", error);
       // To prevent surfaceflinger infinite wait, flush the previous frame during Commit()
@@ -1347,6 +1351,9 @@ HWC2::Error HWCDisplay::PrepareLayerStack(uint32_t *out_num_types, uint32_t *out
       callbacks_->Refresh(id_);
       return HWC2::Error::BadDisplay;
     }
+  } else {
+    // clear geometry_changes_on_doze_suspend_ on successful prepare.
+    geometry_changes_on_doze_suspend_ = GeometryChanges::kNone;
   }
 
   for (auto hwc_layer : layer_set_) {
