@@ -128,6 +128,7 @@ class HWCDisplayBuiltIn : public HWCDisplay, public SyncTask<LayerStitchTaskCode
                                       int32_t dataspace, hwc_region_t damage);
   virtual bool IsSmartPanelConfig(uint32_t config_id);
   virtual int Deinit();
+  virtual HWC2::Error SetPowerMode(HWC2::PowerMode mode, bool teardown) override;
 
  private:
   HWCDisplayBuiltIn(CoreInterface *core_intf, BufferAllocator *buffer_allocator,
@@ -184,6 +185,8 @@ class HWCDisplayBuiltIn : public HWCDisplay, public SyncTask<LayerStitchTaskCode
   GLLayerStitch* gl_layer_stitch_ = nullptr;
   BufferInfo buffer_info_ = {};
   DisplayConfigVariableInfo fb_config_ = {};
+
+  float last_brightness = -1.0f;
 };
 
 }  // namespace sdm

@@ -999,6 +999,8 @@ HWC2::Error HWCDisplayBuiltIn::SetPanelBrightness(float brightness) {
     return HWC2::Error::NoResources;
   }
 
+  last_brightness = brightness;
+
   return HWC2::Error::None;
 }
 
@@ -1201,6 +1203,19 @@ void HWCDisplayBuiltIn::AppendStitchLayer() {
   Layer *sdm_stitch_target = stitch_target_->GetSDMLayer();
   sdm_stitch_target->composition = kCompositionStitchTarget;
   layer_stack_.layers.push_back(sdm_stitch_target);
+}
+
+HWC2::Error HWCDisplayBuiltIn::SetPowerMode(HWC2::PowerMode mode, bool teardown) {
+  // Ideally we should receive brightness -1.0f before the power mode is
+  // switched to off. Setting -1.0f here in case of some exceptions.
+  if (mode == HWC2::PowerMode::Off && last_brightness != -1.0f) {
+    auto status = SetPanelBrightness(-1.0f);
+    if (status != HWC2::Error::None) {
+      DLOGE("Failed to set panel brightness -1.0f. Error = %d", status);
+    }
+  }
+
+  return HWCDisplay::SetPowerMode(mode, teardown);
 }
 
 }  // namespace sdm
