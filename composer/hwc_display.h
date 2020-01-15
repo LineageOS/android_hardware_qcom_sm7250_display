@@ -377,6 +377,10 @@ class HWCDisplay : public DisplayEventHandler {
     pending_power_mode_ = current_power_mode_;
   }
   virtual void NotifyClientStatus(bool connected) { client_connected_ = connected; }
+  virtual bool IsQsyncCallbackNeeded(bool *qsync_enabled, int32_t *refresh_rate,
+                                     int32_t *qsync_refresh_rate) {
+    return false;
+  }
 
  protected:
   static uint32_t throttling_refresh_rate_;
@@ -474,6 +478,7 @@ class HWCDisplay : public DisplayEventHandler {
   qService::QService *qservice_ = NULL;
   DisplayClass display_class_;
   uint32_t geometry_changes_ = GeometryChanges::kNone;
+  uint32_t geometry_changes_on_doze_suspend_ = GeometryChanges::kNone;
   bool animating_ = false;
   int null_display_mode_ = 0;
   DisplayValidateState validate_state_ = kNormalValidate;
@@ -482,6 +487,7 @@ class HWCDisplay : public DisplayEventHandler {
   int fbt_release_fence_ = -1;
   int release_fence_ = -1;
   hwc2_config_t pending_config_index_ = 0;
+  bool game_supported_ = false;
 };
 
 inline int HWCDisplay::Perform(uint32_t operation, ...) {

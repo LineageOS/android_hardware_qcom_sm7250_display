@@ -129,6 +129,8 @@ class HWCDisplayBuiltIn : public HWCDisplay, public SyncTask<LayerStitchTaskCode
   virtual bool IsSmartPanelConfig(uint32_t config_id);
   virtual int Deinit();
   virtual HWC2::Error SetPowerMode(HWC2::PowerMode mode, bool teardown) override;
+  virtual bool IsQsyncCallbackNeeded(bool *qsync_enabled, int32_t *refresh_rate,
+                                     int32_t *qsync_refresh_rate);
 
  private:
   HWCDisplayBuiltIn(CoreInterface *core_intf, BufferAllocator *buffer_allocator,
@@ -153,6 +155,7 @@ class HWCDisplayBuiltIn : public HWCDisplay, public SyncTask<LayerStitchTaskCode
   bool InitLayerStitch();
   void InitStitchTarget();
   bool AllocateStitchBuffer();
+  void CacheAvrStatus();
 
   // SyncTask methods.
   void OnTask(const LayerStitchTaskCode &task_code,
@@ -187,6 +190,9 @@ class HWCDisplayBuiltIn : public HWCDisplay, public SyncTask<LayerStitchTaskCode
   DisplayConfigVariableInfo fb_config_ = {};
 
   float last_brightness = -1.0f;
+
+  bool qsync_enabled_ = false;
+  bool qsync_reconfigured_ = false;
 };
 
 }  // namespace sdm
