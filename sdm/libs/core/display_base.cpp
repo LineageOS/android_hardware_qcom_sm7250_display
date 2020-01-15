@@ -295,7 +295,8 @@ DisplayError DisplayBase::Prepare(LayerStack *layer_stack) {
   needs_validate_ = true;
 
   DTRACE_SCOPED();
-  if (!active_) {
+  // Allow prepare as pending doze/pending_power_on is handled as a part of draw cycle
+  if (!active_ && !pending_doze_ && !pending_power_on_) {
     return kErrorPermission;
   }
 
@@ -362,7 +363,8 @@ DisplayError DisplayBase::Commit(LayerStack *layer_stack) {
   lock_guard<recursive_mutex> obj(recursive_mutex_);
   DisplayError error = kErrorNone;
 
-  if (!active_) {
+  // Allow commit as pending doze/pending_power_on is handled as a part of draw cycle
+  if (!active_ && !pending_doze_ && !pending_power_on_) {
     needs_validate_ = true;
     return kErrorPermission;
   }
@@ -429,6 +431,8 @@ DisplayError DisplayBase::Commit(LayerStack *layer_stack) {
   if (error != kErrorNone) {
     return error;
   }
+
+  comp_manager_->SetSafeMode(false);
 
   DLOGI_IF(kTagDisplay, "Exiting commit for display: %d-%d", display_id_, display_type_);
 
@@ -620,13 +624,20 @@ DisplayError DisplayBase::SetDisplayState(DisplayState state, bool teardown,
   DisablePartialUpdateOneFrame();
 
   if (error == kErrorNone) {
-    active_ = active;
-    state_ = state;
+    if (!pending_doze_ && !pending_power_on_) {
+      active_ = active;
+      state_ = state;
+    }
     comp_manager_->SetDisplayState(display_comp_ctx_, state, release_fence ? *release_fence : -1);
     // If previously requested doze state is still pending reset it on any new display state request
     // and handle the new request.
-    if (state_ != kStateDoze) {
+    if (state != kStateDoze) {
       pending_doze_ = false;
+    }
+    // If previously requested power on state is still pending reset it on any new display state
+    // request and handle the new request.
+    if (state != kStateOn) {
+      pending_power_on_ = false;
     }
   }
 
@@ -1219,10 +1230,9 @@ DisplayError DisplayBase::HandlePendingVSyncEnable(int32_t retire_fence) {
 DisplayError DisplayBase::SetVSyncState(bool enable) {
   lock_guard<recursive_mutex> obj(recursive_mutex_);
 
-  if ((state_ == kStateOff || pending_doze_ || pending_power_on_) && enable) {
-    DLOGW("Can't enable vsync when power state is off or doze pending for display %d-%d," \
-          "Defer it when display is active state %d pending_doze_ %d pending_power_on_ %d",
-          display_id_, display_type_, state_, pending_doze_, pending_power_on_);
+  if (state_ == kStateOff && enable) {
+    DLOGW("Can't enable vsync when display %d-%d is powered off!! Defer it when display is active",
+          display_id_, display_type_);
     vsync_enable_pending_ = true;
     return kErrorNone;
   }
@@ -2039,6 +2049,14 @@ DisplayError DisplayBase::HandlePendingPowerState(int32_t retire_fence) {
     // we enable vsync
     buffer_sync_handler_->SyncWait(retire_fence);
 
+    if (pending_doze_) {
+      state_ = kStateDoze;
+    }
+    if (pending_power_on_) {
+      state_ = kStateOn;
+    }
+    active_ = true;
+
     pending_doze_ = false;
     pending_power_on_ = false;
   }
@@ -2047,6 +2065,13 @@ DisplayError DisplayBase::HandlePendingPowerState(int32_t retire_fence) {
 
 bool DisplayBase::CheckResourceState() {
   return comp_manager_->CheckResourceState(display_comp_ctx_);
+}
+
+bool DisplayBase::GameEnhanceSupported() {
+  if (color_mgr_) {
+    return color_mgr_->GameEnhanceSupported();
+  }
+  return false;
 }
 
 }  // namespace sdm
