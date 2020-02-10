@@ -421,13 +421,13 @@ DisplayError DisplayBase::Commit(LayerStack *layer_stack) {
   drop_hw_vsync_ = false;
 
   // Reset pending power state if any after the commit
-  error = HandlePendingPowerState(layer_stack->retire_fence_fd);
+  error = HandlePendingPowerState(layer_stack->retire_fence);
   if (error != kErrorNone) {
     return error;
   }
 
   // Handle pending vsync enable if any after the commit
-  error = HandlePendingVSyncEnable(layer_stack->retire_fence_fd);
+  error = HandlePendingVSyncEnable(layer_stack->retire_fence);
   if (error != kErrorNone) {
     return error;
   }
@@ -644,7 +644,7 @@ DisplayError DisplayBase::SetDisplayState(DisplayState state, bool teardown,
   // Handle vsync pending on resume, Since the power on commit is synchronous we pass -1 as retire
   // fence otherwise pass valid retire fence
   if (state_ == kStateOn) {
-    return HandlePendingVSyncEnable(-1 /* retire fence */);
+    return HandlePendingVSyncEnable(nullptr /* retire fence */);
   }
 
   return error;
@@ -785,9 +785,9 @@ std::string DisplayBase::Dump() {
       INT(fb_roi.right) << " " << INT(fb_roi.bottom) << ")";
   }
 
-  const char *header  = "\n| Idx |  Comp Type |   Split   | Pipe |    W x H    |          Format          |  Src Rect (L T R B) |  Dst Rect (L T R B) |  Z | Pipe Flags | Deci(HxV) | CS | Rng | Tr |";  //NOLINT
-  const char *newline = "\n|-----|------------|-----------|------|-------------|--------------------------|---------------------|---------------------|----|------------|-----------|----|-----|----|";  //NOLINT
-  const char *format  = "\n| %3s | %10s | %9s | %4d | %4d x %4d | %24s | %4d %4d %4d %4d | %4d %4d %4d %4d | %2s | %10s | %9s | %2s | %3s | %2s |";  //NOLINT
+  const char *header  = "\n| Idx |   Comp Type   |   Split   | Pipe |    W x H    |          Format          |  Src Rect (L T R B) |  Dst Rect (L T R B) |  Z | Pipe Flags | Deci(HxV) | CS | Rng | Tr |";  //NOLINT
+  const char *newline = "\n|-----|---------------|-----------|------|-------------|--------------------------|---------------------|---------------------|----|------------|-----------|----|-----|----|";  //NOLINT
+  const char *format  = "\n| %3s | %13s | %9s | %4d | %4d x %4d | %24s | %4d %4d %4d %4d | %4d %4d %4d %4d | %2s | %10s | %9s | %2s | %3s | %2s |";  //NOLINT
 
   os << "\n";
   os << newline;
@@ -1212,11 +1212,11 @@ DisplayError DisplayBase::GetRefreshRateRange(uint32_t *min_refresh_rate,
   return error;
 }
 
-DisplayError DisplayBase::HandlePendingVSyncEnable(int32_t retire_fence) {
+DisplayError DisplayBase::HandlePendingVSyncEnable(const shared_ptr<Fence> &retire_fence) {
   if (vsync_enable_pending_) {
     // Retire fence signalling confirms that CRTC enabled, hence wait for retire fence before
     // we enable vsync
-    buffer_sync_handler_->SyncWait(retire_fence);
+    Fence::Wait(retire_fence);
 
     DisplayError error = SetVSyncState(true /* enable */);
     if (error != kErrorNone) {
@@ -1622,6 +1622,10 @@ void DisplayBase::CommitLayerParams(LayerStack *layer_stack) {
       hw_layer.input_buffer.unaligned_width = sdm_layer->input_buffer.unaligned_width;
       hw_layer.input_buffer.unaligned_height = sdm_layer->input_buffer.unaligned_height;
     }
+  }
+
+  if (layer_stack->elapse_timestamp) {
+    hw_layers_.elapse_timestamp = layer_stack->elapse_timestamp;
   }
 
   return;
@@ -2040,14 +2044,26 @@ bool DisplayBase::IsHdrMode(const AttrVal &attr) {
 }
 
 bool DisplayBase::CanSkipValidate() {
-  return comp_manager_->CanSkipValidate(display_comp_ctx_);
+  bool needs_buffer_swap = false;
+  bool skip_validate = comp_manager_->CanSkipValidate(display_comp_ctx_, &needs_buffer_swap);
+
+  if (needs_buffer_swap) {
+    hw_layers_.updates_mask.set(kSwapBuffers);
+    DisplayError error = comp_manager_->SwapBuffers(display_comp_ctx_);
+    if (error != kErrorNone) {
+      // Buffers couldn't be swapped.
+      skip_validate = false;
+    }
+  }
+
+  return skip_validate;
 }
 
-DisplayError DisplayBase::HandlePendingPowerState(int32_t retire_fence) {
+DisplayError DisplayBase::HandlePendingPowerState(const shared_ptr<Fence> &retire_fence) {
   if (pending_doze_ || pending_power_on_) {
     // Retire fence signalling confirms that CRTC enabled, hence wait for retire fence before
     // we enable vsync
-    buffer_sync_handler_->SyncWait(retire_fence);
+    Fence::Wait(retire_fence);
 
     if (pending_doze_) {
       state_ = kStateDoze;
@@ -2065,6 +2081,13 @@ DisplayError DisplayBase::HandlePendingPowerState(int32_t retire_fence) {
 
 bool DisplayBase::CheckResourceState() {
   return comp_manager_->CheckResourceState(display_comp_ctx_);
+}
+DisplayError DisplayBase::colorSamplingOn() {
+  return kErrorNone;
+}
+
+DisplayError DisplayBase::colorSamplingOff() {
+  return kErrorNone;
 }
 
 bool DisplayBase::GameEnhanceSupported() {

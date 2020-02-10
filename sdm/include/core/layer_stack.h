@@ -33,6 +33,7 @@
 
 #include <stdint.h>
 #include <utils/constants.h>
+#include <utils/fence.h>
 
 #include <vector>
 #include <utility>
@@ -421,7 +422,8 @@ struct PrimariesTransfer {
 struct LayerStack {
   std::vector<Layer *> layers = {};    //!< Vector of layer pointers.
 
-  int retire_fence_fd = -1;            //!< File descriptor referring to a sync fence object which
+  shared_ptr<Fence> retire_fence = nullptr;
+                                       //!< File descriptor referring to a sync fence object which
                                        //!< will be signaled when this composited frame has been
                                        //!< replaced on screen by a subsequent frame on a physical
                                        //!< display. The fence object is created and returned during
@@ -437,6 +439,8 @@ struct LayerStack {
 
 
   PrimariesTransfer blend_cs = {};     //!< o/p - Blending color space of the frame, updated by SDM
+
+  uint64_t elapse_timestamp = 0;       //!< system time until which display commit needs to be held
 };
 
 }  // namespace sdm

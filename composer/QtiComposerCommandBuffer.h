@@ -24,6 +24,7 @@
 #include <sync/sync.h>
 #include <fmq/MessageQueue.h>
 #include <hidl/MQDescriptor.h>
+#include <utils/fence.h>
 
 #include <limits>
 #include <algorithm>
@@ -34,7 +35,7 @@ namespace qti {
 namespace hardware {
 namespace display {
 namespace composer {
-namespace V2_0 {
+namespace V2_1 {
 
 using ::android::hardware::graphics::common::V1_0::ColorTransform;
 using ::android::hardware::graphics::common::V1_0::Dataspace;
@@ -48,6 +49,9 @@ using ::android::hardware::hidl_vec;
 using ::android::hardware::hidl_handle;
 
 using CommandQueueType = MessageQueue<uint32_t, ::android::hardware::kSynchronizedReadWrite>;
+
+using std::shared_ptr;
+using sdm::Fence;
 
 // This class helps build a command queue.  Note that all sizes/lengths are in units of uint32_t's.
 class CommandWriter {
@@ -206,9 +210,9 @@ class CommandWriter {
   }
 
   static constexpr uint16_t kSetPresentFenceLength = 1;
-  void setPresentFence(int presentFence) {
+  void setPresentFence(const shared_ptr<Fence> &presentFence) {
     beginCommand(IQtiComposerClient::Command::SET_PRESENT_FENCE, kSetPresentFenceLength);
-    writeFence(presentFence);
+    writeFence(Fence::Dup(presentFence));
     endCommand();
   }
 
@@ -484,6 +488,13 @@ class CommandWriter {
       write(static_cast<uint32_t>(metadataBlob.blob.size()));
       writeBlob(static_cast<uint32_t>(metadataBlob.blob.size()), metadataBlob.blob.data());
     }
+    endCommand();
+  }
+
+  static constexpr uint16_t kSetDisplayElapseTime = 2;
+  void setDisplayElapseTime(uint64_t time) {
+    beginCommand(IQtiComposerClient::Command::SET_DISPLAY_ELAPSE_TIME, kSetDisplayElapseTime);
+    write64(time);
     endCommand();
   }
 
@@ -847,7 +858,7 @@ class CommandReaderBase {
   hidl_vec<hidl_handle> mDataHandles;
 };
 
-}  // namespace V2_0
+}  // namespace V2_1
 }  // namespace composer
 }  // namespace display
 }  // namespace hardware
