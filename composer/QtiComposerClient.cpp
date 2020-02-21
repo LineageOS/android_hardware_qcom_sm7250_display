@@ -26,7 +26,7 @@ namespace qti {
 namespace hardware {
 namespace display {
 namespace composer {
-namespace V2_0 {
+namespace V2_1 {
 namespace implementation {
 
 ComposerHandleImporter mHandleImporter;
@@ -101,14 +101,11 @@ QtiComposerClient::~QtiComposerClient() {
 
       hwc_session_->AcceptDisplayChanges(dpy.first);
 
-      int32_t presentFence = -1;
+      shared_ptr<sdm::Fence> presentFence = nullptr;
       std::vector<Layer> releasedLayers;
       std::vector<int32_t> releaseFences;
-      mReader.presentDisplay(dpy.first, presentFence, releasedLayers, releaseFences);
+      mReader.presentDisplay(dpy.first, &presentFence, releasedLayers, releaseFences);
 
-      if (presentFence >= 0) {
-        close(presentFence);
-      }
       for (auto fence : releaseFences) {
         if (fence >= 0) {
           close(fence);
@@ -1129,6 +1126,9 @@ Error QtiComposerClient::CommandReader::parse() {
       case IQtiComposerClient::Command::SET_LAYER_TYPE:
         parsed = parseSetLayerType(length);
         break;
+      case IQtiComposerClient::Command::SET_DISPLAY_ELAPSE_TIME:
+        parsed = parseSetDisplayElapseTime(length);
+        break;
       default:
         parsed = parseCommonCmd(static_cast<IComposerClient::Command>(qticommand), length);
         break;
@@ -1350,10 +1350,11 @@ bool QtiComposerClient::CommandReader::parseAcceptDisplayChanges(uint16_t length
   return true;
 }
 
-Error QtiComposerClient::CommandReader::presentDisplay(Display display, int32_t& presentFence,
+Error QtiComposerClient::CommandReader::presentDisplay(Display display,
+                                                       shared_ptr<Fence> *presentFence,
                                                        std::vector<Layer>& layers,
                                                        std::vector<int32_t>& releaseFences) {
-  int32_t err = mClient.hwc_session_->PresentDisplay(display, &presentFence);
+  int32_t err = mClient.hwc_session_->PresentDisplay(display, presentFence);
   if (err != HWC2_ERROR_NONE) {
     return static_cast<Error>(err);
   }
@@ -1384,11 +1385,11 @@ bool QtiComposerClient::CommandReader::parsePresentDisplay(uint16_t length) {
     return false;
   }
 
-  int presentFence;
+  shared_ptr<Fence> presentFence = nullptr;
   std::vector<Layer> layers;
   std::vector<int> fences;
 
-  auto err = presentDisplay(mDisplay, presentFence, layers, fences);
+  auto err = presentDisplay(mDisplay, &presentFence, layers, fences);
   if (err == Error::NONE) {
     mWriter.setPresentFence(presentFence);
     mWriter.setReleaseFences(layers, fences);
@@ -1407,10 +1408,10 @@ bool QtiComposerClient::CommandReader::parsePresentOrValidateDisplay(uint16_t le
   // First try to Present as is.
   mClient.getCapabilities();
   if (mClient.hasCapability(HWC2_CAPABILITY_SKIP_VALIDATE)) {
-    int presentFence = -1;
+    shared_ptr<Fence> presentFence = nullptr;
     std::vector<Layer> layers;
     std::vector<int> fences;
-    auto err = presentDisplay(mDisplay, presentFence, layers, fences);
+    auto err = presentDisplay(mDisplay, &presentFence, layers, fences);
     if (err == Error::NONE) {
       mWriter.setPresentOrValidateResult(1);
       mWriter.setPresentFence(presentFence);
@@ -1769,6 +1770,20 @@ bool QtiComposerClient::CommandReader::parseSetLayerPerFrameMetadataBlobs(uint16
   return true;
 }
 
+bool QtiComposerClient::CommandReader::parseSetDisplayElapseTime(uint16_t length) {
+  if (length < CommandWriter::kSetDisplayElapseTime) {
+    return false;
+  }
+  uint64_t time = read64();
+
+  auto err = mClient.hwc_session_->SetDisplayElapseTime(mDisplay, time);
+  if (static_cast<Error>(err) != Error::NONE) {
+    mWriter.setError(getCommandLoc(), static_cast<Error>(err));
+  }
+
+  return true;
+}
+
 hwc_rect_t QtiComposerClient::CommandReader::readRect() {
   return hwc_rect_t{
     readSigned(),
@@ -1911,7 +1926,7 @@ IQtiComposerClient* HIDL_FETCH_IQtiComposerClient(const char* /* name */) {
 }
 
 }  // namespace implementation
-}  // namespace V2_0
+}  // namespace V2_1
 }  // namespace composer
 }  // namespace display
 }  // namespace hardware

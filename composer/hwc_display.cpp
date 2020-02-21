@@ -465,6 +465,7 @@ int HWCDisplay::Init() {
   DisplayError error = kErrorNone;
 
   HWCDebugHandler::Get()->GetProperty(ENABLE_NULL_DISPLAY_PROP, &null_display_mode_);
+  HWCDebugHandler::Get()->GetProperty(ENABLE_ASYNC_POWERMODE, &async_power_mode_);
 
   if (null_display_mode_) {
     DisplayNull *disp_null = new DisplayNull();
@@ -916,7 +917,7 @@ void HWCDisplay::PostPowerMode() {
     auto fence = hwc_layer->PopBackReleaseFence();
     auto merged_fence = -1;
     if (fence >= 0) {
-      merged_fence = sync_merge("sync_merge", release_fence_, fence);
+      buffer_sync_handler_.SyncMerge(release_fence_, fence, &merged_fence);
       ::close(fence);
     } else {
       merged_fence = ::dup(release_fence_);
@@ -981,6 +982,11 @@ HWC2::Error HWCDisplay::SetPowerMode(HWC2::PowerMode mode, bool teardown) {
   // Update release fence.
   release_fence_ = release_fence;
   current_power_mode_ = mode;
+
+  // Close the release fences in synchronous power updates
+  if (!async_power_mode_) {
+    PostPowerMode();
+  }
   return HWC2::Error::None;
 }
 
@@ -1314,6 +1320,10 @@ DisplayError HWCDisplay::HandleEvent(DisplayEvent event) {
   return kErrorNone;
 }
 
+DisplayError HWCDisplay::HistogramEvent(int /* fd */, uint32_t /* blob_fd */) {
+  return kErrorNone;
+}
+
 HWC2::Error HWCDisplay::PrepareLayerStack(uint32_t *out_num_types, uint32_t *out_num_requests) {
   layer_changes_.clear();
   layer_requests_.clear();
@@ -1578,6 +1588,11 @@ HWC2::Error HWCDisplay::CommitLayerStack(void) {
       tone_mapper_->Terminate();
     }
   }
+
+  if (elapse_timestamp_) {
+    layer_stack_.elapse_timestamp = elapse_timestamp_;
+  }
+
   error = display_intf_->Commit(&layer_stack_);
 
   if (error == kErrorNone) {
@@ -1603,7 +1618,7 @@ HWC2::Error HWCDisplay::CommitLayerStack(void) {
   return HWC2::Error::None;
 }
 
-HWC2::Error HWCDisplay::PostCommitLayerStack(int32_t *out_retire_fence) {
+HWC2::Error HWCDisplay::PostCommitLayerStack(shared_ptr<Fence> *out_retire_fence) {
   auto status = HWC2::Error::None;
 
   // Do no call flush on errors, if a successful buffer is never submitted.
@@ -1662,14 +1677,10 @@ HWC2::Error HWCDisplay::PostCommitLayerStack(int32_t *out_retire_fence) {
   }
 
   client_target_->GetSDMLayer()->request.flags = {};
-  *out_retire_fence = -1;
   // if swapinterval property is set to 0 then close and reset the list retire fence
-  if (swap_interval_zero_) {
-    close(layer_stack_.retire_fence_fd);
-    layer_stack_.retire_fence_fd = -1;
+  if (!swap_interval_zero_) {
+    *out_retire_fence = layer_stack_.retire_fence;
   }
-  *out_retire_fence = layer_stack_.retire_fence_fd;
-  layer_stack_.retire_fence_fd = -1;
 
   if (dump_frame_count_) {
     dump_frame_count_--;
@@ -1777,7 +1788,8 @@ void HWCDisplay::DumpInputBuffers() {
   }
 }
 
-void HWCDisplay::DumpOutputBuffer(const BufferInfo &buffer_info, void *base, int fence) {
+void HWCDisplay::DumpOutputBuffer(const BufferInfo &buffer_info, void *base,
+                                  shared_ptr<Fence> &retire_fence) {
   char dir_path[PATH_MAX];
   int  status;
 
@@ -1800,12 +1812,9 @@ void HWCDisplay::DumpOutputBuffer(const BufferInfo &buffer_info, void *base, int
     char dump_file_name[PATH_MAX];
     size_t result = 0;
 
-    if (fence >= 0) {
-      int error = sync_wait(fence, 1000);
-      if (error < 0) {
-        DLOGW("sync_wait error errno = %d, desc = %s", errno, strerror(errno));
-        return;
-      }
+    if (Fence::Wait(retire_fence) != kErrorNone) {
+      DLOGW("sync_wait error errno = %d, desc = %s", errno, strerror(errno));
+      return;
     }
 
     snprintf(dump_file_name, sizeof(dump_file_name), "%s/output_layer_%dx%d_%s_frame%d.raw",
@@ -2115,10 +2124,6 @@ void HWCDisplay::SolidFillCommit() {
       close(layer_buffer->release_fence_fd);
       layer_buffer->release_fence_fd = -1;
     }
-    if (layer_stack_.retire_fence_fd > 0) {
-      close(layer_stack_.retire_fence_fd);
-      layer_stack_.retire_fence_fd = -1;
-    }
   }
 }
 
@@ -2364,8 +2369,35 @@ HWC2::Error HWCDisplay::GetDisplayIdentificationData(uint8_t *out_port, uint32_t
   return HWC2::Error::None;
 }
 
+HWC2::Error HWCDisplay::SetDisplayElapseTime(uint64_t time) {
+  elapse_timestamp_ = time;
+  return HWC2::Error::None;
+}
+
 bool HWCDisplay::IsDisplayCommandMode() {
   return is_cmd_mode_;
+}
+
+HWC2::Error HWCDisplay::SetDisplayedContentSamplingEnabledVndService(bool enabled) {
+  return HWC2::Error::Unsupported;
+}
+
+HWC2::Error HWCDisplay::SetDisplayedContentSamplingEnabled(int32_t enabled, uint8_t component_mask,
+                                                           uint64_t max_frames) {
+  DLOGV("Request to start/stop histogram thread not supported on this display");
+  return HWC2::Error::Unsupported;
+}
+
+HWC2::Error HWCDisplay::GetDisplayedContentSamplingAttributes(int32_t *format, int32_t *dataspace,
+                                                              uint8_t *supported_components) {
+  return HWC2::Error::Unsupported;
+}
+
+HWC2::Error HWCDisplay::GetDisplayedContentSample(
+    uint64_t max_frames, uint64_t timestamp, uint64_t *numFrames,
+    int32_t samples_size[NUM_HISTOGRAM_COLOR_COMPONENTS],
+    uint64_t *samples[NUM_HISTOGRAM_COLOR_COMPONENTS]) {
+  return HWC2::Error::Unsupported;
 }
 
 // Skip SDM prepare if all the layers in the current draw cycle are marked as Skip and

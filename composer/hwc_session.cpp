@@ -138,7 +138,11 @@ void HWCUEvent::Register(HWCUEventListener *uevent_listener) {
   uevent_listener_ = uevent_listener;
 }
 
+#ifndef DISPLAY_CONFIG_VERSION_OPTIMAL
 HWCSession::HWCSession() : cwb_(this) {}
+#else
+HWCSession::HWCSession() {}
+#endif
 
 HWCSession *HWCSession::GetInstance() {
   // executed only once for the very first call.
@@ -201,7 +205,20 @@ int HWCSession::Init() {
   is_composer_up_ = true;
   StartServices();
 
+  PostInit();
+
   return 0;
+}
+
+void HWCSession::PostInit() {
+  if (null_display_mode_) {
+    return;
+  }
+
+  // Start services which need IDisplayConfig to be up.
+  // This avoids deadlock between composer and its clients.
+  auto hwc_display = hwc_display_[HWC_DISPLAY_PRIMARY];
+  hwc_display->PostInit();
 }
 
 int HWCSession::Deinit() {
@@ -628,6 +645,32 @@ int32_t HWCSession:: SetLayerPerFrameMetadataBlobs(hwc2_display_t display,
                            num_elements, keys, sizes, metadata);
 }
 
+int32_t HWCSession::SetDisplayedContentSamplingEnabled(hwc2_display_t display, int32_t enabled,
+                                                       uint8_t component_mask,
+                                                       uint64_t max_frames) {
+  static constexpr int32_t validComponentMask = HWC2_FORMAT_COMPONENT_0 | HWC2_FORMAT_COMPONENT_1 |
+                                                HWC2_FORMAT_COMPONENT_2 | HWC2_FORMAT_COMPONENT_3;
+  if (component_mask & ~validComponentMask)
+    return HWC2_ERROR_BAD_PARAMETER;
+  return CallDisplayFunction(display, &HWCDisplay::SetDisplayedContentSamplingEnabled, enabled,
+                             component_mask, max_frames);
+}
+
+int32_t HWCSession::GetDisplayedContentSamplingAttributes(hwc2_display_t display, int32_t *format,
+                                                          int32_t *dataspace,
+                                                          uint8_t *supported_components) {
+  return CallDisplayFunction(display, &HWCDisplay::GetDisplayedContentSamplingAttributes, format,
+                             dataspace, supported_components);
+}
+
+int32_t HWCSession::GetDisplayedContentSample(hwc2_display_t display, uint64_t max_frames,
+                                              uint64_t timestamp, uint64_t *numFrames,
+                                              int32_t samples_size[NUM_HISTOGRAM_COLOR_COMPONENTS],
+                                              uint64_t *samples[NUM_HISTOGRAM_COLOR_COMPONENTS]) {
+  return CallDisplayFunction(display, &HWCDisplay::GetDisplayedContentSample, max_frames, timestamp,
+                             numFrames, samples_size, samples);
+}
+
 int32_t HWCSession::GetDisplayAttribute(hwc2_display_t display, hwc2_config_t config,
                                         int32_t int_attribute, int32_t *out_value) {
   if (out_value == nullptr || int_attribute < HWC2_ATTRIBUTE_INVALID ||
@@ -676,6 +719,7 @@ int32_t HWCSession::GetReleaseFences(hwc2_display_t display, uint32_t *out_num_e
                              out_fences);
 }
 
+#ifndef DISPLAY_CONFIG_VERSION_OPTIMAL
 void HWCSession::PerformQsyncCallback(hwc2_display_t display) {
   if (qsync_callback_ == nullptr) {
     return;
@@ -688,8 +732,12 @@ void HWCSession::PerformQsyncCallback(hwc2_display_t display) {
     qsync_callback_->onQsyncReconfigured(qsync_enabled, refresh_rate, qsync_refresh_rate);
   }
 }
+#else
+void HWCSession::PerformQsyncCallback(hwc2_display_t display) {
+}
+#endif
 
-int32_t HWCSession::PresentDisplay(hwc2_display_t display, int32_t *out_retire_fence) {
+int32_t HWCSession::PresentDisplay(hwc2_display_t display, shared_ptr<Fence> *out_retire_fence) {
   auto status = HWC2::Error::BadDisplay;
   DTRACE_SCOPED();
 
@@ -725,7 +773,7 @@ int32_t HWCSession::PresentDisplay(hwc2_display_t display, int32_t *out_retire_f
     if (pending_power_mode_[display]) {
       status = HWC2::Error::None;
     } else {
-      status = PresentDisplayInternal(target_display, out_retire_fence);
+      status = PresentDisplayInternal(target_display);
       if (status == HWC2::Error::None) {
         // Check if hwc's refresh trigger is getting exercised.
         if (callbacks_.NeedsRefresh(display)) {
@@ -747,7 +795,9 @@ int32_t HWCSession::PresentDisplay(hwc2_display_t display, int32_t *out_retire_f
   HandlePendingPowerMode(display, *out_retire_fence);
   HandlePendingHotplug(display, *out_retire_fence);
   HandlePendingRefresh();
+#ifndef DISPLAY_CONFIG_VERSION_OPTIMAL
   cwb_.PresentDisplayDone(display);
+#endif
   display_ready_.set(UINT32(display));
   {
     std::unique_lock<std::mutex> caller_lock(hotplug_mutex_);
@@ -975,6 +1025,10 @@ int32_t HWCSession::SetLayerType(hwc2_display_t display, hwc2_layer_t layer,
 int32_t HWCSession::SetLayerColorTransform(hwc2_display_t display, hwc2_layer_t layer,
                                            const float *matrix) {
   return CallLayerFunction(display, layer, &HWCLayer::SetLayerColorTransform, matrix);
+}
+
+int32_t HWCSession::SetDisplayElapseTime(hwc2_display_t display, uint64_t time) {
+  return CallDisplayFunction(display, &HWCDisplay::SetDisplayElapseTime, time);
 }
 
 int32_t HWCSession::SetOutputBuffer(hwc2_display_t display, buffer_handle_t buffer,
@@ -1499,6 +1553,14 @@ android::status_t HWCSession::notifyCallback(uint32_t command, const android::Pa
       status = SetQSyncMode(input_parcel);
       break;
 
+    case qService::IQService::SET_COLOR_SAMPLING_ENABLED:
+      if (!input_parcel) {
+        DLOGE("QService command = %d: input_parcel needed.", command);
+        break;
+      }
+      status = setColorSamplingEnabled(input_parcel);
+      break;
+
     case qService::IQService::SET_IDLE_PC:
       if (!input_parcel) {
         DLOGE("QService command = %d: input_parcel needed.", command);
@@ -1641,6 +1703,24 @@ android::status_t HWCSession::GetDisplayAttributesForConfig(const android::Parce
   }
 
   return error;
+}
+
+android::status_t HWCSession::setColorSamplingEnabled(const android::Parcel *input_parcel) {
+  int dpy = input_parcel->readInt32();
+  int enabled_cmd = input_parcel->readInt32();
+  if (dpy < HWC_DISPLAY_PRIMARY || dpy >= HWC_NUM_DISPLAY_TYPES || enabled_cmd < 0 ||
+      enabled_cmd > 1) {
+    return android::BAD_VALUE;
+  }
+
+  SEQUENCE_WAIT_SCOPE_LOCK(locker_[dpy]);
+  if (!hwc_display_[dpy]) {
+    DLOGW("No display id %i active to enable histogram event", dpy);
+    return android::BAD_VALUE;
+  }
+
+  auto error = hwc_display_[dpy]->SetDisplayedContentSamplingEnabledVndService(enabled_cmd);
+  return (error == HWC2::Error::None) ? android::OK : android::BAD_VALUE;
 }
 
 android::status_t HWCSession::ConfigureRefreshRate(const android::Parcel *input_parcel) {
@@ -1828,8 +1908,8 @@ android::status_t HWCSession::SetAd4RoiConfig(const android::Parcel *input_parce
   auto f_in = static_cast<uint32_t>(input_parcel->readInt32());
   auto f_out = static_cast<uint32_t>(input_parcel->readInt32());
 
-  return static_cast<android::status_t>(SetDisplayDppsAdROI(display_id, h_s, h_e, v_s,
-                                                            v_e, f_in, f_out));
+  return CallDisplayFunction(display_id, &HWCDisplay::SetDisplayDppsAdROI,
+                             h_s, h_e, v_s, v_e, f_in, f_out);
 }
 
 android::status_t HWCSession::SetFrameTriggerMode(const android::Parcel *input_parcel) {
@@ -2864,7 +2944,7 @@ HWC2::Error HWCSession::ValidateDisplayInternal(hwc2_display_t display, uint32_t
   return hwc_display->Validate(out_num_types, out_num_requests);
 }
 
-HWC2::Error HWCSession::PresentDisplayInternal(hwc2_display_t display, int32_t *out_retire_fence) {
+HWC2::Error HWCSession::PresentDisplayInternal(hwc2_display_t display) {
   HWCDisplay *hwc_display = hwc_display_[display];
 
   DTRACE_SCOPED();
@@ -2972,7 +3052,8 @@ void HWCSession::HandleSecureSession() {
   }
 }
 
-void HWCSession::HandlePendingPowerMode(hwc2_display_t disp_id, int retire_fence) {
+void HWCSession::HandlePendingPowerMode(hwc2_display_t disp_id,
+                                        const shared_ptr<Fence> &retire_fence) {
   if (!secure_session_active_) {
     // No secure session active. Skip remaining steps.
     return;
@@ -2982,7 +3063,6 @@ void HWCSession::HandlePendingPowerMode(hwc2_display_t disp_id, int retire_fence
   if (disp_id != active_builtin_disp_id) {
     return;
   }
-
 
   Locker::ScopeLock lock_d(locker_[active_builtin_disp_id]);
   bool pending_power_mode = false;
@@ -2996,20 +3076,19 @@ void HWCSession::HandlePendingPowerMode(hwc2_display_t disp_id, int retire_fence
       }
     }
   }
-  if (pending_power_mode) {
-    // retire fence is set only after successful primary commit, So check for retire fence to know
-    // non secure commit went through to notify driver to change the CRTC mode to non secure.
-    // Otherwise any commit to non-primary display would fail.
-    if (retire_fence < 0) {
-      return;
-    }
-    int error = sync_wait(retire_fence, 1000);
-    if (error < 0) {
-      DLOGE("sync_wait error errno = %d, desc = %s", errno, strerror(errno));
-    }
-  } else {
+
+  if (!pending_power_mode) {
     return;
   }
+
+  // retire fence is set only after successful primary commit, So check for retire fence to know
+  // non secure commit went through to notify driver to change the CRTC mode to non secure.
+  // Otherwise any commit to non-primary display would fail.
+  if (retire_fence == nullptr) {
+    return;
+  }
+
+  Fence::Wait(retire_fence);
 
   for (hwc2_display_t display = HWC_DISPLAY_PRIMARY + 1;
     display < HWCCallbacks::kNumDisplays; display++) {
@@ -3031,7 +3110,8 @@ void HWCSession::HandlePendingPowerMode(hwc2_display_t disp_id, int retire_fence
   secure_session_active_ = false;
 }
 
-void HWCSession::HandlePendingHotplug(hwc2_display_t disp_id, int retire_fence) {
+void HWCSession::HandlePendingHotplug(hwc2_display_t disp_id,
+                                      const shared_ptr<Fence> &retire_fence) {
   hwc2_display_t active_builtin_disp_id = GetActiveBuiltinDisplay();
   if (disp_id != active_builtin_disp_id ||
       (kHotPlugNone == pending_hotplug_event_ && !destroy_virtual_disp_pending_)) {
@@ -3049,12 +3129,8 @@ void HWCSession::HandlePendingHotplug(hwc2_display_t disp_id, int retire_fence) 
   }
 
   if (destroy_virtual_disp_pending_ || kHotPlugEvent == pending_hotplug_event_) {
-    if (retire_fence >= 0) {
-      int error = sync_wait(retire_fence, 1000);
-      if (error < 0) {
-        DLOGE("sync_wait error errno = %d, desc = %s", errno,  strerror(errno));
-      }
-    }
+    Fence::Wait(retire_fence);
+
     // Destroy the pending virtual display if secure session not present.
     if (destroy_virtual_disp_pending_) {
       for (auto &map_info : map_info_virtual_) {
@@ -3260,7 +3336,7 @@ android::status_t HWCSession::SetIdlePC(const android::Parcel *input_parcel) {
   auto enable = input_parcel->readInt32();
   auto synchronous = input_parcel->readInt32();
 
-  return static_cast<android::status_t>(controlIdlePowerCollapse(enable, synchronous));
+  return static_cast<android::status_t>(IdlePowerCollapse(enable, synchronous));
 }
 
 hwc2_display_t HWCSession::GetActiveBuiltinDisplay() {
