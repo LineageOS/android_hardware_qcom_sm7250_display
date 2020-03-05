@@ -42,7 +42,6 @@ PRODUCT_PROPERTY_OVERRIDES += \
     debug.sf.hw=0 \
     debug.egl.hw=0 \
     debug.sf.latch_unsignaled=1 \
-    debug.sf.high_fps_late_app_phase_offset_ns=1000000 \
     debug.mdpcomp.logs=0 \
     vendor.gralloc.disable_ubwc=0 \
     vendor.display.disable_scaler=0 \
