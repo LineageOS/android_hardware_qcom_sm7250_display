@@ -441,7 +441,7 @@ DisplayError DisplayBuiltIn::SetPanelBrightness(float brightness) {
     return kErrorParameters;
   }
 
-  if (state_ == kStateOff) {
+  if (state_ == kStateOff && !pending_doze_ && !pending_power_on_) {
     return kErrorNone;
   }
 
