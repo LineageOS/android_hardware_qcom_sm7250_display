@@ -468,7 +468,8 @@ class HWCSession : hwc2_device_t, HWCUEventListener, IDisplayConfig, public qCli
   android::status_t getComposerStatus();
   android::status_t SetQSyncMode(const android::Parcel *input_parcel);
   android::status_t SetIdlePC(const android::Parcel *input_parcel);
-  android::status_t SetDisplayDeviceStatus(const android::Parcel* input_parcel);
+  android::status_t SetDisplayDeviceStatus(const android::Parcel *input_parcel);
+  android::status_t SetPanelGammaTableSource(const android::Parcel *input_parcel);
   android::status_t RefreshScreen(const android::Parcel *input_parcel);
   android::status_t SetAd4RoiConfig(const android::Parcel *input_parcel);
   android::status_t SetDsiClk(const android::Parcel *input_parcel);

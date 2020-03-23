@@ -54,6 +54,102 @@ static void SetRect(LayerRect &src_rect, GLRect *target) {
   target->bottom = src_rect.bottom;
 }
 
+static std::string LoadPanelGammaCalibration() {
+  constexpr char file[] = "/mnt/vendor/persist/display/gamma_calib_data.cal";
+  int fd = open(file, O_RDONLY);
+  if (fd < 0) {
+    DLOGW("Unable to open gamma calibration '%s', error = %s", file, strerror(errno));
+    return {};
+  }
+
+  struct stat info;
+  if (fstat(fd, &info) == -1) {
+    DLOGE("Unable to stat gamma calibration '%s', error = %s", file, strerror(errno));
+    close(fd);
+    return {};
+  }
+
+  std::vector<char> buf(info.st_size);
+  char *ptr = buf.data();
+  ssize_t len;
+  while (((len = read(fd, ptr, info.st_size - (ptr - buf.data()))) != 0)) {
+    if (len > 0) {
+      ptr += len;
+    } else if ((errno != EINTR) && (errno != EAGAIN)) {
+      break;
+    }
+  }
+  close(fd);
+
+  if (len == 0) {
+    char *token, *saveptr = nullptr;
+    const char *delim = "\r\n";
+    std::string gamma;
+
+    token = strtok_r(buf.data(), delim, &saveptr);
+    while (token) {
+      gamma.append(token);
+      gamma.append(" ");
+      token = strtok_r(NULL, delim, &saveptr);
+    }
+
+    if (!gamma.empty()) {
+      gamma.pop_back();
+    }
+
+    return gamma;
+  } else {
+    DLOGE("Failed to read gamma calibration data, error = %s", strerror(errno));
+    return {};
+  }
+}
+
+static DisplayError WritePanelGammaTableToDriver(const std::string &gamma_data) {
+  constexpr char gamma_path[] = "/sys/devices/platform/soc/soc:qcom,dsi-display-primary/gamma";
+  int fd = open(gamma_path, O_WRONLY);
+  if (fd < 0) {
+    DLOGW("Unable to open gamma node '%s', error = %s", gamma_path, strerror(errno));
+    return kErrorFileDescriptor;
+  }
+
+  constexpr int max_retries = 5;
+  ssize_t len;
+  int retry_count = 0;
+  DisplayError error = kErrorNone;
+  while ((len = pwrite(fd, gamma_data.c_str(), gamma_data.size(), 0)) != gamma_data.size()) {
+    if ((len == -1 && errno != EINTR && errno != EAGAIN) || (++retry_count > max_retries)) {
+      DLOGE("Failed to write gamma calibration(retry %d), error = %s", retry_count,
+            strerror(errno));
+      break;
+    }
+  }
+  close(fd);
+
+  if (len != gamma_data.size()) {
+    error = kErrorResources;
+  }
+
+  return error;
+}
+
+static DisplayError UpdatePanelGammaTable(enum HWCDisplay::PanelGammaSource source) {
+  std::string gamma_data = {};
+  DisplayError error;
+  if (source == HWCDisplay::kGammaDefault) {
+    gamma_data = "default";
+  } else if (source == HWCDisplay::kGammaCalibration) {
+    gamma_data = LoadPanelGammaCalibration();
+  }
+
+  if (!gamma_data.empty()) {
+    error = WritePanelGammaTableToDriver(gamma_data);
+  } else {
+    error = kErrorParameters;
+  }
+
+  return error;
+}
+
 int HWCDisplayBuiltIn::Create(CoreInterface *core_intf, BufferAllocator *buffer_allocator,
                               HWCCallbacks *callbacks, HWCDisplayEventHandler *event_handler,
                               qService::QService *qservice, hwc2_display_t id, int32_t sdm_id,
@@ -1126,6 +1222,15 @@ HWC2::Error HWCDisplayBuiltIn::GetPanelMaxBrightness(uint32_t *max_brightness_le
   }
 
   return HWC2::Error::None;
+}
+
+DisplayError HWCDisplayBuiltIn::SetCurrentPanelGammaSource(enum PanelGammaSource source) {
+  DisplayError error = UpdatePanelGammaTable(source);
+  if (error == kErrorNone) {
+    current_panel_gamma_source_ = source;
+  }
+
+  return error;
 }
 
 HWC2::Error HWCDisplayBuiltIn::SetBLScale(uint32_t level) {
