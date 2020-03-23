@@ -80,6 +80,7 @@ public:
       SET_BRIGHTNESS_SCALE = 48,               // Set brightness scale ratio
       SET_COLOR_SAMPLING_ENABLED = 49,         // Toggle the collection of display color stats
       SET_DISPLAY_DEVICE_STATUS = 100,         // Set display device status
+      SET_PANEL_GAMMA_TABLE_SOURCE = 101,      // Update panel gamma table
       COMMAND_LIST_END = 400,
     };
 

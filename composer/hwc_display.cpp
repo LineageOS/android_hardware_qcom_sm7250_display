@@ -528,6 +528,8 @@ int HWCDisplay::Init() {
 
   game_supported_ = display_intf_->GameEnhanceSupported();
 
+  SetCurrentPanelGammaSource(kGammaCalibration);
+
   DLOGI("Display created with id: %d, game_supported_: %d", id_, game_supported_);
 
   return 0;
@@ -2254,6 +2256,8 @@ std::string HWCDisplay::Dump() {
     os << " secure: " << client_target_->IsProtected()
        << std::endl;
   }
+
+  os << "\npanel gamma source: " << GetCurrentPanelGammaSource() << std::endl;
 
   if (layer_stack_invalid_) {
     os << "\n Layers added or removed but not reflected to SDM's layer stack yet\n";

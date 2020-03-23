@@ -121,6 +121,8 @@ class HWCDisplayBuiltIn : public HWCDisplay, public SyncTask<LayerStitchTaskCode
   virtual HWC2::Error SetPanelBrightness(float brightness);
   virtual HWC2::Error GetPanelBrightness(float *brightness);
   virtual HWC2::Error GetPanelMaxBrightness(uint32_t *max_brightness_level);
+  virtual DisplayError SetCurrentPanelGammaSource(enum PanelGammaSource source) override;
+  virtual PanelGammaSource GetCurrentPanelGammaSource() const override { return current_panel_gamma_source_; };
   virtual DisplayError TeardownConcurrentWriteback(void);
   virtual void SetFastPathComposition(bool enable) {
     fast_path_composition_ = enable && !readback_buffer_queued_;
@@ -204,6 +206,8 @@ class HWCDisplayBuiltIn : public HWCDisplay, public SyncTask<LayerStitchTaskCode
   GLLayerStitch* gl_layer_stitch_ = nullptr;
   BufferInfo buffer_info_ = {};
   DisplayConfigVariableInfo fb_config_ = {};
+
+  enum PanelGammaSource current_panel_gamma_source_ = kGammaDefault;
 
   bool qsync_enabled_ = false;
   bool qsync_reconfigured_ = false;

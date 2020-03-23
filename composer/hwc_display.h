@@ -149,6 +149,11 @@ class HWCDisplay : public DisplayEventHandler {
     kSkipValidate,
   };
 
+  enum PanelGammaSource {
+    kGammaDefault,      // Resotre gamma table to default
+    kGammaCalibration,  // Update gamma table from calibration file
+  };
+
   struct HWCLayerStack {
     HWCLayer *client_target = nullptr;                   // Also known as framebuffer target
     std::map<hwc2_layer_t, HWCLayer *> layer_map;        // Look up by Id - TODO
@@ -179,6 +184,8 @@ class HWCDisplay : public DisplayEventHandler {
   virtual DisplayError SetMixerResolution(uint32_t width, uint32_t height);
   virtual DisplayError GetMixerResolution(uint32_t *width, uint32_t *height);
   virtual void GetPanelResolution(uint32_t *width, uint32_t *height);
+  virtual DisplayError SetCurrentPanelGammaSource(enum PanelGammaSource /*source*/) { return kErrorNotSupported; }
+  virtual PanelGammaSource GetCurrentPanelGammaSource() const { return kGammaDefault; };
   virtual std::string Dump();
   virtual DisplayError TeardownConcurrentWriteback(void) {
     return kErrorNotSupported;
