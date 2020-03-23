@@ -1579,6 +1579,15 @@ android::status_t HWCSession::notifyCallback(uint32_t command, const android::Pa
       status = SetDisplayDeviceStatus(input_parcel);
       break;
 
+    case qService::IQService::SET_PANEL_GAMMA_TABLE_SOURCE:
+      if (!input_parcel || !output_parcel) {
+        DLOGE("QService command = %d: input_parcel and output_parcel needed.", command);
+        break;
+      }
+      status = SetPanelGammaTableSource(input_parcel);
+      output_parcel->writeInt32(status);
+      break;
+
     case qService::IQService::SET_DPPS_AD4_ROI_CONFIG:
       if (!input_parcel) {
         DLOGE("QService command = %d: input_parcel needed.", command);
@@ -1651,14 +1660,14 @@ android::status_t HWCSession::notifyCallback(uint32_t command, const android::Pa
   return status;
 }
 
-android::status_t HWCSession::SetDisplayDeviceStatus(const android::Parcel* input_parcel) {
+android::status_t HWCSession::SetDisplayDeviceStatus(const android::Parcel *input_parcel) {
   int dpy = input_parcel->readInt32();
   int error = android::BAD_VALUE;
   auto disp_status = static_cast<HWCDisplay::DisplayStatus>(input_parcel->readInt32());
 
   int disp_idx = GetDisplayIndex(dpy);
   if (disp_idx == -1) {
-    DLOGE("Invalid display = %d");
+    DLOGE("Invalid display = %d", dpy);
     return android::BAD_VALUE;
   }
 
@@ -1666,7 +1675,30 @@ android::status_t HWCSession::SetDisplayDeviceStatus(const android::Parcel* inpu
   if (hwc_display_[disp_idx]) {
     error = hwc_display_[disp_idx]->SetDisplayStatus(disp_status);
     if (error != android::OK)
-      DLOGW("Set disply %d status to %d failed with error %d", dpy, disp_status, error);
+      DLOGW("Set display %d status to %d failed with error %d", dpy, disp_status, error);
+  } else {
+    DLOGW("No display %d active", dpy);
+  }
+
+  return error;
+}
+
+android::status_t HWCSession::SetPanelGammaTableSource(const android::Parcel *input_parcel) {
+  int dpy = input_parcel->readInt32();
+  int error = android::BAD_VALUE;
+  auto source = static_cast<HWCDisplay::PanelGammaSource>(input_parcel->readInt32());
+
+  int disp_idx = GetDisplayIndex(dpy);
+  if (disp_idx == -1) {
+    DLOGE("Invalid display = %d", dpy);
+    return android::BAD_VALUE;
+  }
+
+  SEQUENCE_WAIT_SCOPE_LOCK(locker_[disp_idx]);
+  if (hwc_display_[disp_idx]) {
+    error = hwc_display_[disp_idx]->SetCurrentPanelGammaSource(source);
+    if (error != android::OK)
+      DLOGW("Set display %d gamma source to %d failed with error %d", dpy, source, error);
   } else {
     DLOGW("No display %d active", dpy);
   }
