@@ -10,6 +10,7 @@ endif
 endif
 
 include $(LOCAL_PATH)/../common.mk
+include $(LIBION_HEADER_PATH_WRAPPER)
 include $(CLEAR_VARS)
 
 LOCAL_MODULE                  := gralloc.$(TARGET_BOARD_PLATFORM)
