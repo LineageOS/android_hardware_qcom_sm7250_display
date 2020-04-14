@@ -1190,10 +1190,10 @@ HWC2::Error HWCDisplay::SetClientTarget(buffer_handle_t target, shared_ptr<Fence
     return HWC2::Error::None;
   }
 
-  if (acquire_fence == nullptr) {
-    DLOGW("acquire_fence is zero");
-    return HWC2::Error::BadParameter;
-  }
+  // The fence is null if the client composition result is used in
+  // SurfaceFlinger. To align the behavior of sm8150, the null check
+  // (acquire_fence == nullptr) should be removed so that the invalid fence
+  // could be sent to SetLayerBuffer and avoid flicker issues.
 
   Layer *sdm_layer = client_target_->GetSDMLayer();
   sdm_layer->frame_rate = std::min(current_refresh_rate_, HWCDisplay::GetThrottlingRefreshRate());
