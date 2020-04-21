@@ -3278,12 +3278,9 @@ int32_t HWCSession::GetDisplayCapabilities(hwc2_display_t display,
 
   bool isBuiltin = (hwc_display_[display]->GetDisplayClass() == DISPLAY_CLASS_BUILTIN);
   if (isBuiltin) {
-    capabilities->resize(4);
     // TODO(user): Handle SKIP_CLIENT_COLOR_TRANSFORM based on DSPP availability
-    std::vector<HwcDisplayCapability> caps{
-        HwcDisplayCapability::SKIP_CLIENT_COLOR_TRANSFORM, HwcDisplayCapability::DOZE,
-        HwcDisplayCapability::BRIGHTNESS, HwcDisplayCapability::PROTECTED_CONTENTS};
-    capabilities->setToExternal(caps.data(), caps.size());
+    *capabilities = { HwcDisplayCapability::SKIP_CLIENT_COLOR_TRANSFORM, HwcDisplayCapability::DOZE,
+      HwcDisplayCapability::BRIGHTNESS, HwcDisplayCapability::PROTECTED_CONTENTS };
   }
   return HWC2_ERROR_NONE;
 }
@@ -3300,7 +3297,7 @@ int32_t HWCSession::GetDisplayConnectionType(hwc2_display_t display,
 
   if (!hwc_display_[display]) {
     DLOGE("Expected valid hwc_display");
-    return HWC2_ERROR_BAD_PARAMETER;
+    return HWC2_ERROR_BAD_DISPLAY;
   }
   *type = HwcDisplayConnectionType::EXTERNAL;
   if (hwc_display_[display]->GetDisplayClass() == DISPLAY_CLASS_BUILTIN) {
