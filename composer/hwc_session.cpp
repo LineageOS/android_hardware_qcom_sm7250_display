@@ -51,6 +51,8 @@
 #define HWC_UEVENT_SWITCH_HDMI "change@/devices/virtual/switch/hdmi"
 #define HWC_UEVENT_DRM_EXT_HOTPLUG "mdss_mdp/drm/card"
 
+using HwcAttribute = composer_V2_4::IComposerClient::Attribute;
+
 namespace sdm {
 
 static HWCUEvent g_hwc_uevent_;
@@ -671,12 +673,10 @@ int32_t HWCSession::GetDisplayedContentSample(hwc2_display_t display, uint64_t m
 }
 
 int32_t HWCSession::GetDisplayAttribute(hwc2_display_t display, hwc2_config_t config,
-                                        int32_t int_attribute, int32_t *out_value) {
-  if (out_value == nullptr || int_attribute < HWC2_ATTRIBUTE_INVALID ||
-      int_attribute > HWC2_ATTRIBUTE_CONFIG_GROUP) {
+                                        HwcAttribute attribute, int32_t *out_value) {
+  if (out_value == nullptr) {
     return HWC2_ERROR_BAD_PARAMETER;
   }
-  auto attribute = static_cast<HWC2::Attribute>(int_attribute);
   return CallDisplayFunction(display, &HWCDisplay::GetDisplayAttribute, config, attribute,
                              out_value);
 }
@@ -769,6 +769,7 @@ int32_t HWCSession::PresentDisplay(hwc2_display_t display, shared_ptr<Fence> *ou
     if (pending_power_mode_[display]) {
       status = HWC2::Error::None;
     } else {
+      hwc_display_[target_display]->ProcessActiveConfigChange();
       status = PresentDisplayInternal(target_display);
       if (status == HWC2::Error::None) {
         // Check if hwc's refresh trigger is getting exercised.
@@ -1159,6 +1160,7 @@ int32_t HWCSession::ValidateDisplay(hwc2_display_t display, uint32_t *out_num_ty
     if (pending_power_mode_[display]) {
       status = HWC2::Error::None;
     } else if (hwc_display_[target_display]) {
+      hwc_display_[target_display]->ProcessActiveConfigChange();
       hwc_display_[target_display]->SetFastPathComposition(false);
       status = ValidateDisplayInternal(target_display, out_num_types, out_num_requests);
     }
@@ -2447,17 +2449,21 @@ void HWCSession::UEventHandler(const char *uevent_data, int length) {
   }
 }
 
-int HWCSession::GetVsyncPeriod(int disp) {
-  SCOPE_LOCK(locker_[disp]);
-  // default value
-  int32_t vsync_period = 1000000000l / 60;
-  auto attribute = HWC2::Attribute::VsyncPeriod;
-
-  if (hwc_display_[disp]) {
-    hwc_display_[disp]->GetDisplayAttribute(0, attribute, &vsync_period);
+int32_t HWCSession::GetVsyncPeriod(hwc2_display_t disp, uint32_t *vsync_period) {
+  if (disp >= HWCCallbacks::kNumDisplays) {
+    DLOGW("Invalid Display : display = %" PRIu64, disp);
+    return HWC2_ERROR_BAD_DISPLAY;
   }
 
-  return vsync_period;
+  SCOPE_LOCK(locker_[(int)disp]);
+  // default value
+  *vsync_period = 1000000000ul / 60;
+
+  if (hwc_display_[disp]) {
+    hwc_display_[disp]->GetDisplayAttribute(0, HwcAttribute::VSYNC_PERIOD, (int32_t *)vsync_period);
+  }
+
+  return HWC2_ERROR_NONE;
 }
 
 void HWCSession::Refresh(hwc2_display_t display) {
@@ -3255,9 +3261,9 @@ int32_t HWCSession::GetDisplayIdentificationData(hwc2_display_t display, uint8_t
                              outDataSize, outData);
 }
 
-int32_t HWCSession::GetDisplayCapabilities(hwc2_display_t display, uint32_t *outNumCapabilities,
-                                           uint32_t *outCapabilities) {
-  if (!outNumCapabilities) {
+int32_t HWCSession::GetDisplayCapabilities(hwc2_display_t display,
+                                           hidl_vec<HwcDisplayCapability> *capabilities) {
+  if (!capabilities) {
     return HWC2_ERROR_BAD_PARAMETER;
   }
 
@@ -3269,23 +3275,36 @@ int32_t HWCSession::GetDisplayCapabilities(hwc2_display_t display, uint32_t *out
     DLOGE("Expected valid hwc_display");
     return HWC2_ERROR_BAD_PARAMETER;
   }
+
   bool isBuiltin = (hwc_display_[display]->GetDisplayClass() == DISPLAY_CLASS_BUILTIN);
-  if (!outCapabilities) {
-    *outNumCapabilities = 0;
-    if (isBuiltin) {
-      *outNumCapabilities = 3;
-    }
-    return HWC2_ERROR_NONE;
-  } else {
-    if (isBuiltin) {
-      // TODO(user): Handle SKIP_CLIENT_COLOR_TRANSFORM based on DSPP availability
-      outCapabilities[0] = HWC2_DISPLAY_CAPABILITY_SKIP_CLIENT_COLOR_TRANSFORM;
-      outCapabilities[1] = HWC2_DISPLAY_CAPABILITY_DOZE;
-      outCapabilities[2] = HWC2_DISPLAY_CAPABILITY_BRIGHTNESS;
-      *outNumCapabilities = 3;
-    }
-    return HWC2_ERROR_NONE;
+  if (isBuiltin) {
+    // TODO(user): Handle SKIP_CLIENT_COLOR_TRANSFORM based on DSPP availability
+    *capabilities = { HwcDisplayCapability::SKIP_CLIENT_COLOR_TRANSFORM, HwcDisplayCapability::DOZE,
+      HwcDisplayCapability::BRIGHTNESS, HwcDisplayCapability::PROTECTED_CONTENTS };
   }
+  return HWC2_ERROR_NONE;
+}
+
+int32_t HWCSession::GetDisplayConnectionType(hwc2_display_t display,
+                                             HwcDisplayConnectionType *type) {
+  if (display >= HWCCallbacks::kNumDisplays) {
+    return HWC2_ERROR_BAD_DISPLAY;
+  }
+
+  if (!type) {
+    return HWC2_ERROR_BAD_PARAMETER;
+  }
+
+  if (!hwc_display_[display]) {
+    DLOGE("Expected valid hwc_display");
+    return HWC2_ERROR_BAD_DISPLAY;
+  }
+  *type = HwcDisplayConnectionType::EXTERNAL;
+  if (hwc_display_[display]->GetDisplayClass() == DISPLAY_CLASS_BUILTIN) {
+    *type = HwcDisplayConnectionType::INTERNAL;
+  }
+
+  return HWC2_ERROR_NONE;
 }
 
 int32_t HWCSession::GetDisplayBrightnessSupport(hwc2_display_t display, bool *outSupport) {
@@ -3437,6 +3456,26 @@ void HWCSession::WaitForResources(bool wait_for_resources, hwc2_display_t active
       res_wait = hwc_display_[display_id]->CheckResourceState();
     } while (res_wait);
   }
+}
+
+int32_t HWCSession::GetDisplayVsyncPeriod(hwc2_display_t disp, VsyncPeriodNanos *vsync_period) {
+  if (vsync_period == nullptr) {
+    return HWC2_ERROR_BAD_PARAMETER;
+  }
+
+  return CallDisplayFunction(disp, &HWCDisplay::GetDisplayVsyncPeriod, vsync_period);
+}
+
+int32_t HWCSession::SetActiveConfigWithConstraints(
+    hwc2_display_t display, hwc2_config_t config,
+    const VsyncPeriodChangeConstraints *vsync_period_change_constraints,
+    VsyncPeriodChangeTimeline *out_timeline) {
+  if ((vsync_period_change_constraints == nullptr) || (out_timeline == nullptr)) {
+    return HWC2_ERROR_BAD_PARAMETER;
+  }
+
+  return CallDisplayFunction(display, &HWCDisplay::SetActiveConfigWithConstraints, config,
+                             vsync_period_change_constraints, out_timeline);
 }
 
 }  // namespace sdm
