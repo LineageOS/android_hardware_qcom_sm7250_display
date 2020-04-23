@@ -3478,4 +3478,29 @@ int32_t HWCSession::SetActiveConfigWithConstraints(
                              vsync_period_change_constraints, out_timeline);
 }
 
+int32_t HWCSession::SetAutoLowLatencyMode(hwc2_display_t display, bool on) {
+  if (display >= HWCCallbacks::kNumDisplays) {
+    return HWC2_ERROR_BAD_DISPLAY;
+  }
+
+  return CallDisplayFunction(display, &HWCDisplay::SetAutoLowLatencyMode, on);
+}
+
+int32_t HWCSession::GetSupportedContentTypes(hwc2_display_t display,
+                                             hidl_vec<HwcContentType> *types) {
+  if (display >= HWCCallbacks::kNumDisplays) {
+    return HWC2_ERROR_BAD_DISPLAY;
+  }
+
+  return CallDisplayFunction(display, &HWCDisplay::GetSupportedContentTypes, types);
+}
+
+int32_t HWCSession::SetContentType(hwc2_display_t display, HwcContentType type) {
+  if (display >= HWCCallbacks::kNumDisplays) {
+    return HWC2_ERROR_BAD_DISPLAY;
+  }
+
+  return CallDisplayFunction(display, &HWCDisplay::SetContentType, type);
+}
+
 }  // namespace sdm

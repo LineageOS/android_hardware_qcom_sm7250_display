@@ -1034,6 +1034,7 @@ Return<void> QtiComposerClient::registerCallback_2_4(
   enableCallback(callback != nullptr);
   return Void();
 }
+
 Return<void> QtiComposerClient::getDisplayCapabilities_2_4(uint64_t display,
                                                            getDisplayCapabilities_2_4_cb _hidl_cb) {
   hidl_vec<composer_V2_4::IComposerClient::DisplayCapability> capabilities;
@@ -1083,19 +1084,24 @@ Return<void> QtiComposerClient::setActiveConfigWithConstraints(
 }
 
 Return<composer_V2_4::Error> QtiComposerClient::setAutoLowLatencyMode(uint64_t display, bool on) {
-  return composer_V2_4::Error::UNSUPPORTED;
+  auto error = hwc_session_->SetAutoLowLatencyMode(display, on);
+
+  return static_cast<composer_V2_4::Error>(error);
 }
 
 Return<void> QtiComposerClient::getSupportedContentTypes(uint64_t display,
                                                          getSupportedContentTypes_cb _hidl_cb) {
-  hidl_vec<composer_V2_4::IComposerClient::ContentType> types = {};
-  _hidl_cb(composer_V2_4::Error::NONE, types);
+  hidl_vec<composer_V2_4::IComposerClient::ContentType> types;
+  auto error = hwc_session_->GetSupportedContentTypes(display, &types);
+  _hidl_cb(static_cast<composer_V2_4::Error>(error), types);
   return Void();
 }
 
 Return<composer_V2_4::Error> QtiComposerClient::setContentType(
     uint64_t display, composer_V2_4::IComposerClient::ContentType type) {
-  return composer_V2_4::Error::UNSUPPORTED;
+  auto error = hwc_session_->SetContentType(display, type);
+
+  return static_cast<composer_V2_4::Error>(error);
 }
 
 Return<void> QtiComposerClient::getLayerGenericMetadataKeys(
