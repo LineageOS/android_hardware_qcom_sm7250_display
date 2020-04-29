@@ -51,7 +51,6 @@
 using ::android::hardware::Return;
 using ::android::hardware::hidl_string;
 using android::hardware::hidl_handle;
-using ::android::hardware::hidl_vec;
 using ::android::sp;
 using ::android::hardware::Void;
 namespace composer_V2_4 = ::android::hardware::graphics::composer::V2_4;
@@ -288,6 +287,10 @@ class HWCSession : hwc2_device_t, HWCUEventListener, public qClient::BnQClient,
       hwc2_display_t display, hwc2_config_t config,
       const VsyncPeriodChangeConstraints *vsync_period_change_constraints,
       VsyncPeriodChangeTimeline *out_timeline);
+
+  int32_t SetAutoLowLatencyMode(hwc2_display_t display, bool on);
+  int32_t GetSupportedContentTypes(hwc2_display_t display, hidl_vec<HwcContentType> *types);
+  int32_t SetContentType(hwc2_display_t display, HwcContentType type);
 
   static Locker locker_[HWCCallbacks::kNumDisplays];
   static Locker power_state_[HWCCallbacks::kNumDisplays];
