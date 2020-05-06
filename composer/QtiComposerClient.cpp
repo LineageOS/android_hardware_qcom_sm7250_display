@@ -957,8 +957,21 @@ Return<Error> QtiComposerClient::setColorMode_2_3(uint64_t display, common_V1_2:
 
 Return<void> QtiComposerClient::getDisplayCapabilities(uint64_t display,
                                                        getDisplayCapabilities_cb _hidl_cb) {
-  // We only care about passing VTS for older composer versions
-  // Not returning any capabilities that are optional
+  hidl_vec<composer_V2_3::IComposerClient::DisplayCapability> capabilities;
+  uint32_t count = 0;
+  auto error = hwc_session_->GetDisplayCapabilities(display, &count, nullptr);
+  if (error != HWC2_ERROR_NONE) {
+    _hidl_cb(static_cast<Error>(error), capabilities);
+    return Void();
+  }
+
+  capabilities.resize(count);
+  error = hwc_session_->GetDisplayCapabilities(
+      display, &count,
+      reinterpret_cast<std::underlying_type<composer_V2_3::IComposerClient::DisplayCapability>::type
+                           *>(capabilities.data()));
+
+  _hidl_cb(static_cast<Error>(error), capabilities);
   return Void();
 }
 
@@ -1035,8 +1048,39 @@ Return<void> QtiComposerClient::registerCallback_2_4(
 
 Return<void> QtiComposerClient::getDisplayCapabilities_2_4(uint64_t display,
                                                            getDisplayCapabilities_2_4_cb _hidl_cb) {
-  hidl_vec<composer_V2_4::IComposerClient::DisplayCapability> capabilities;
-  auto error = hwc_session_->GetDisplayCapabilities(display, &capabilities);
+  hidl_vec<HwcDisplayCapability> capabilities;
+  uint32_t count = 0;
+  auto error = hwc_session_->GetDisplayCapabilities(display, &count, nullptr);
+  if (error != HWC2_ERROR_NONE) {
+    _hidl_cb(static_cast<composer_V2_4::Error>(error), capabilities);
+    return Void();
+  }
+
+  uint32_t count_2_4 = 0;
+  error = hwc_session_->GetDisplayCapabilities_2_4(display, &count_2_4, nullptr);
+  if (error != HWC2_ERROR_NONE) {
+    _hidl_cb(static_cast<composer_V2_4::Error>(error), capabilities);
+    return Void();
+  }
+
+  capabilities.resize(count + count_2_4);
+  error = hwc_session_->GetDisplayCapabilities(
+      display, &count,
+      reinterpret_cast<std::underlying_type<HwcDisplayCapability>::type *>(capabilities.data()));
+  if (error != HWC2_ERROR_NONE) {
+    _hidl_cb(static_cast<composer_V2_4::Error>(error), {});
+    return Void();
+  }
+
+  error = hwc_session_->GetDisplayCapabilities_2_4(
+      display, &count_2_4,
+      reinterpret_cast<std::underlying_type<HwcDisplayCapability>::type *>(capabilities.data() +
+                                                                           count));
+  if (error != HWC2_ERROR_NONE) {
+    _hidl_cb(static_cast<composer_V2_4::Error>(error), {});
+    return Void();
+  }
+
   _hidl_cb(static_cast<composer_V2_4::Error>(error), capabilities);
   return Void();
 }
