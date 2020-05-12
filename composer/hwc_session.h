@@ -194,8 +194,10 @@ class HWCSession : hwc2_device_t, HWCUEventListener, public qClient::BnQClient,
   uint32_t GetMaxVirtualDisplayCount();
   int32_t GetDisplayIdentificationData(hwc2_display_t display, uint8_t *outPort,
                                        uint32_t *outDataSize, uint8_t *outData);
-  int32_t GetDisplayCapabilities(hwc2_display_t display,
-                                 hidl_vec<HwcDisplayCapability> *capabilities);
+  int32_t GetDisplayCapabilities(hwc2_display_t display, uint32_t *outNumCapabilities,
+                                 uint32_t *capabilities);
+  int32_t GetDisplayCapabilities_2_4(hwc2_display_t display, uint32_t *outNumCapabilities,
+                                     uint32_t *capabilities);
   int32_t GetDisplayBrightnessSupport(hwc2_display_t display, bool *outSupport);
   int32_t SetDisplayBrightness(hwc2_display_t display, float brightness);
   void WaitForResources(bool wait_for_resources, hwc2_display_t active_builtin_id,
