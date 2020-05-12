@@ -3261,9 +3261,9 @@ int32_t HWCSession::GetDisplayIdentificationData(hwc2_display_t display, uint8_t
                              outDataSize, outData);
 }
 
-int32_t HWCSession::GetDisplayCapabilities(hwc2_display_t display,
-                                           hidl_vec<HwcDisplayCapability> *capabilities) {
-  if (!capabilities) {
+int32_t HWCSession::GetDisplayCapabilities(hwc2_display_t display, uint32_t *outNumCapabilities,
+                                           uint32_t *outCapabilities) {
+  if (!outNumCapabilities) {
     return HWC2_ERROR_BAD_PARAMETER;
   }
 
@@ -3277,11 +3277,44 @@ int32_t HWCSession::GetDisplayCapabilities(hwc2_display_t display,
   }
 
   bool isBuiltin = (hwc_display_[display]->GetDisplayClass() == DISPLAY_CLASS_BUILTIN);
+  *outNumCapabilities = 0;
   if (isBuiltin) {
-    // TODO(user): Handle SKIP_CLIENT_COLOR_TRANSFORM based on DSPP availability
-    *capabilities = { HwcDisplayCapability::SKIP_CLIENT_COLOR_TRANSFORM, HwcDisplayCapability::DOZE,
-      HwcDisplayCapability::BRIGHTNESS, HwcDisplayCapability::PROTECTED_CONTENTS };
+    *outNumCapabilities = 3;
+    if (outCapabilities != nullptr) {
+      // TODO(user): Handle SKIP_CLIENT_COLOR_TRANSFORM based on DSPP availability
+      outCapabilities[0] = static_cast<uint32_t>(HwcDisplayCapability::SKIP_CLIENT_COLOR_TRANSFORM);
+      outCapabilities[1] = static_cast<uint32_t>(HwcDisplayCapability::DOZE);
+      outCapabilities[2] = static_cast<uint32_t>(HwcDisplayCapability::BRIGHTNESS);
+    }
   }
+
+  return HWC2_ERROR_NONE;
+}
+
+int32_t HWCSession::GetDisplayCapabilities_2_4(hwc2_display_t display, uint32_t *outNumCapabilities,
+                                               uint32_t *outCapabilities) {
+  if (!outNumCapabilities) {
+    return HWC2_ERROR_BAD_PARAMETER;
+  }
+
+  if (display >= HWCCallbacks::kNumDisplays) {
+    return HWC2_ERROR_BAD_DISPLAY;
+  }
+
+  if (!hwc_display_[display]) {
+    DLOGE("Expected valid hwc_display");
+    return HWC2_ERROR_BAD_PARAMETER;
+  }
+
+  bool isBuiltin = (hwc_display_[display]->GetDisplayClass() == DISPLAY_CLASS_BUILTIN);
+  *outNumCapabilities = 0;
+  if (isBuiltin) {
+    *outNumCapabilities = 1;
+    if (outCapabilities != nullptr) {
+      outCapabilities[0] = static_cast<uint32_t>(HwcDisplayCapability::PROTECTED_CONTENTS);
+    }
+  }
+
   return HWC2_ERROR_NONE;
 }
 
