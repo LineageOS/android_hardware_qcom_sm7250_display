@@ -421,6 +421,7 @@ class HWCDisplay : public DisplayEventHandler {
   virtual HWC2::Error SetContentType(HwcContentType type);
 
   HWC2::Error SetDisplayElapseTime(uint64_t time);
+  virtual bool HasReadBackBufferSupport() { return false; }
 
  protected:
   static uint32_t throttling_refresh_rate_;
@@ -532,6 +533,8 @@ class HWCDisplay : public DisplayEventHandler {
   std::deque<TransientRefreshRateInfo> transient_refresh_rate_info_;
   std::mutex transient_refresh_rate_lock_;
   float hdr_largest_layer_px_ = 0.0f;
+  LayerRect window_rect_ = {};
+  bool windowed_display_ = true;
 
  private:
   void DumpInputBuffers(void);

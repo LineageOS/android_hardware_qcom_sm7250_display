@@ -238,6 +238,12 @@ int HWCDisplayBuiltIn::Init() {
 
   is_primary_ = display_intf_->IsPrimaryDisplay();
 
+  if (is_primary_) {
+    Debug::GetWindowRect(&window_rect_.left, &window_rect_.top,
+                                 &window_rect_.right, &window_rect_.bottom);
+    DLOGI("Window rect : [%f %f %f %f]", window_rect_.left, window_rect_.top,
+           window_rect_.right, window_rect_.bottom);
+  }
   return status;
 }
 
@@ -1441,6 +1447,13 @@ int HWCDisplayBuiltIn::PostInit() {
   }
 
   return 0;
+}
+
+bool HWCDisplayBuiltIn::HasReadBackBufferSupport() {
+  DisplayConfigFixedInfo fixed_info = {};
+  display_intf_->GetConfig(&fixed_info);
+
+  return fixed_info.readback_supported;
 }
 
 }  // namespace sdm
