@@ -1293,6 +1293,14 @@ Error BufferManager::GetMetadata(private_handle_t *handle, int64_t metadatatype_
     case QTI_PRIVATE_FLAGS:
       android::gralloc4::encodeInt32(qtigralloc::MetadataType_PrivateFlags, handle->flags, out);
       break;
+    case QTI_ALIGNED_WIDTH_IN_PIXELS:
+      android::gralloc4::encodeUint32(qtigralloc::MetadataType_AlignedWidthInPixels, handle->width,
+                                      out);
+      break;
+    case QTI_ALIGNED_HEIGHT_IN_PIXELS:
+      android::gralloc4::encodeUint32(qtigralloc::MetadataType_AlignedHeightInPixels,
+                                      handle->height, out);
+      break;
     default:
       error = Error::UNSUPPORTED;
   }
@@ -1340,6 +1348,8 @@ Error BufferManager::SetMetadata(private_handle_t *handle, int64_t metadatatype_
     case (int64_t)StandardMetadataType::COMPRESSION:
     case QTI_FD:
     case QTI_PRIVATE_FLAGS:
+    case QTI_ALIGNED_WIDTH_IN_PIXELS:
+    case QTI_ALIGNED_HEIGHT_IN_PIXELS:
       return Error::UNSUPPORTED;
     case (int64_t)StandardMetadataType::DATASPACE:
       Dataspace dataspace;
@@ -1404,12 +1414,16 @@ Error BufferManager::SetMetadata(private_handle_t *handle, int64_t metadatatype_
       std::optional<std::vector<uint8_t>> dynamic_metadata_payload;
       android::gralloc4::decodeSmpte2094_40(in, &dynamic_metadata_payload);
       if (dynamic_metadata_payload != std::nullopt) {
-        if (dynamic_metadata_payload->size() > HDR_DYNAMIC_META_DATA_SZ)
+        if (dynamic_metadata_payload->size() > HDR_DYNAMIC_META_DATA_SZ ||
+            dynamic_metadata_payload->size() == 0)
           return Error::BAD_VALUE;
-
         metadata->color.dynamicMetaDataLen = dynamic_metadata_payload->size();
         std::copy(dynamic_metadata_payload->begin(), dynamic_metadata_payload->end(),
                   metadata->color.dynamicMetaDataPayload);
+        metadata->color.dynamicMetaDataValid = true;
+      } else {
+        // Reset metadata by passing in std::nullopt
+        metadata->color.dynamicMetaDataValid = false;
       }
       break;
     }
