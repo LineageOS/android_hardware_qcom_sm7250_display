@@ -148,6 +148,7 @@ class HWCDisplayBuiltIn : public HWCDisplay, public SyncTask<LayerStitchTaskCode
       int32_t samples_size[NUM_HISTOGRAM_COLOR_COMPONENTS],
       uint64_t *samples[NUM_HISTOGRAM_COLOR_COMPONENTS]);
   void Dump(std::ostringstream *os) override;
+  virtual bool HasReadBackBufferSupport();
 
  private:
   HWCDisplayBuiltIn(CoreInterface *core_intf, BufferAllocator *buffer_allocator,
@@ -200,7 +201,7 @@ class HWCDisplayBuiltIn : public HWCDisplay, public SyncTask<LayerStitchTaskCode
   bool frame_capture_buffer_queued_ = false;
   int frame_capture_status_ = -EAGAIN;
   bool is_primary_ = false;
-  bool disable_layer_stitch_ = false;
+  bool disable_layer_stitch_ = true;
   HWCLayer* stitch_target_ = nullptr;
   SyncTask<LayerStitchTaskCode> layer_stitch_task_;
   GLLayerStitch* gl_layer_stitch_ = nullptr;
