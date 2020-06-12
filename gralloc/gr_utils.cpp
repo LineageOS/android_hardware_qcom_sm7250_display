@@ -1430,7 +1430,7 @@ int GetYUVPlaneInfo(const BufferInfo &info, int32_t format, int32_t width, int32
     case HAL_PIXEL_FORMAT_RAW8:
     case HAL_PIXEL_FORMAT_BLOB:
       *plane_count = 1;
-      GetRawPlaneInfo(format, width, height, plane_info);
+      GetRawPlaneInfo(format, info.width, info.height, plane_info);
       break;
 
     case HAL_PIXEL_FORMAT_Y8:
