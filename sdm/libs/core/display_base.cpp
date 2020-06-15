@@ -229,7 +229,7 @@ DisplayError DisplayBase::BuildLayerStackStats(LayerStack *layer_stack) {
   }
 
   hw_layers_info.stitch_target_index = hw_layers_info.gpu_target_index + 1;
-  DLOGD_IF(kTagDisplay, "LayerStack layer_count: %d, app_layer_count: %d, "
+  DLOGD_IF(kTagDisplay, "LayerStack layer_count: %zu, app_layer_count: %d, "
                         "gpu_target_index: %d, stitch_index: %d game_present: %d, display: %d-%d",
                         layers.size(), hw_layers_info.app_layer_count,
                         hw_layers_info.gpu_target_index, hw_layers_info.stitch_target_index,
@@ -617,6 +617,11 @@ DisplayError DisplayBase::SetDisplayState(DisplayState state, bool teardown,
   default:
     DLOGE("Spurious state = %d transition requested.", state);
     return kErrorParameters;
+  }
+
+  error = ReconfigureDisplay();
+  if (error != kErrorNone) {
+    return error;
   }
 
   DisablePartialUpdateOneFrame();
@@ -2062,6 +2067,11 @@ DisplayError DisplayBase::HandlePendingPowerState(const shared_ptr<Fence> &retir
 
     if (pending_doze_) {
       state_ = kStateDoze;
+      DisplayError error = ReconfigureDisplay();
+      if (error != kErrorNone) {
+        return error;
+      }
+      event_handler_->Refresh();
     }
     if (pending_power_on_) {
       state_ = kStateOn;
