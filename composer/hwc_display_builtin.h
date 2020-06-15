@@ -30,6 +30,7 @@
 #ifndef __HWC_DISPLAY_BUILTIN_H__
 #define __HWC_DISPLAY_BUILTIN_H__
 
+#include <thermal_client.h>
 #include <mutex>
 #include <hardware/google/light/1.0/ILight.h>
 #include <limits>
@@ -61,6 +62,7 @@ struct LayerStitchContext : public SyncTask<LayerStitchTaskCode>::TaskContext {
   const private_handle_t* dst_hnd = nullptr;
   GLRect src_rect = {};
   GLRect dst_rect = {};
+  GLRect scissor_rect = {};
   shared_ptr<Fence> src_acquire_fence = nullptr;
   shared_ptr<Fence> dst_acquire_fence = nullptr;
   shared_ptr<Fence> release_fence = nullptr;
@@ -133,6 +135,7 @@ class HWCDisplayBuiltIn : public HWCDisplay, public SyncTask<LayerStitchTaskCode
   virtual HWC2::Error SetClientTarget(buffer_handle_t target, shared_ptr<Fence> acquire_fence,
                                       int32_t dataspace, hwc_region_t damage);
   virtual bool IsSmartPanelConfig(uint32_t config_id);
+  virtual bool HasSmartPanelConfig(void);
   virtual int Deinit();
   virtual bool IsQsyncCallbackNeeded(bool *qsync_enabled, int32_t *refresh_rate,
                                      int32_t *qsync_refresh_rate);
@@ -148,6 +151,7 @@ class HWCDisplayBuiltIn : public HWCDisplay, public SyncTask<LayerStitchTaskCode
       int32_t samples_size[NUM_HISTOGRAM_COLOR_COMPONENTS],
       uint64_t *samples[NUM_HISTOGRAM_COLOR_COMPONENTS]);
   void Dump(std::ostringstream *os) override;
+  virtual HWC2::Error SetPowerMode(HWC2::PowerMode mode, bool teardown);
   virtual bool HasReadBackBufferSupport();
 
  private:
@@ -175,10 +179,17 @@ class HWCDisplayBuiltIn : public HWCDisplay, public SyncTask<LayerStitchTaskCode
   bool AllocateStitchBuffer();
   void CacheAvrStatus();
   void PostCommitStitchLayers();
+  int GetBwCode(const DisplayConfigVariableInfo &attr);
+  void SetBwLimitHint(bool enable);
+  void SetPartialUpdate(DisplayConfigFixedInfo fixed_info);
 
   // SyncTask methods.
   void OnTask(const LayerStitchTaskCode &task_code,
               SyncTask<LayerStitchTaskCode>::TaskContext *task_context);
+
+  constexpr static int kBwLow = 2;
+  constexpr static int kBwMedium = 3;
+  constexpr static int kBwHigh = 4;
 
   BufferAllocator *buffer_allocator_ = nullptr;
   CPUHint *cpu_hint_ = nullptr;
@@ -225,6 +236,10 @@ class HWCDisplayBuiltIn : public HWCDisplay, public SyncTask<LayerStitchTaskCode
   android::sp<hardware::google::light::V1_0::ILight> hardware_ILight_ = nullptr;
   bool has_init_light_server_ = false;
   bool high_brightness_mode_ = false;
+  int curr_refresh_rate_ = 0;
+  bool is_smart_panel_ = false;
+  const char *kDisplayBwName = "display_bw";
+  bool enable_bw_limits_ = false;
 };
 
 }  // namespace sdm
