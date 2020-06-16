@@ -9,25 +9,15 @@ package {
     default_applicable_licenses: ["hardware_qcom_sm7250_display_license"],
 }
 
-cc_library_shared {
-
-    name: "libsdmutils",
-    defaults: ["qtidisplay_defaults"],
-    sanitize: {
-        integer_overflow: true,
-    },
+prebuilt_etc {
+    name: "init.qti.display_boot.rc",
+    src: "init.qti.display_boot.rc",
+    sub_dir: "init",
     vendor: true,
+}
 
-    header_libs: ["display_headers"],
-    cflags: ["-DLOG_TAG=\"SDM\""],
-    srcs: [
-        "debug.cpp",
-        "rect.cpp",
-        "sys.cpp",
-        "fence.cpp",
-        "formats.cpp",
-        "utils.cpp",
-    ],
-
-    shared_libs: ["libdisplaydebug"],
+sh_binary {
+    name: "init.qti.display_boot.sh",
+    src: "init.qti.display_boot.sh",
+    vendor: true,
 }

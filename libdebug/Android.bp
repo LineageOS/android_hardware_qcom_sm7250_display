@@ -12,7 +12,7 @@ package {
 cc_library_shared {
 
     name: "libdisplaydebug",
-    defaults: ["display_defaults"],
+    defaults: ["qtidisplay_defaults"],
     sanitize: {
         integer_overflow: true,
     },

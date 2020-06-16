@@ -11,23 +11,29 @@ package {
 
 cc_library_shared {
 
-    name: "libsdmutils",
-    defaults: ["qtidisplay_defaults"],
+    name: "hdmi_cec.qcom",
     sanitize: {
         integer_overflow: true,
     },
     vendor: true,
+    relative_install_path: "hw",
 
     header_libs: ["display_headers"],
-    cflags: ["-DLOG_TAG=\"SDM\""],
-    srcs: [
-        "debug.cpp",
-        "rect.cpp",
-        "sys.cpp",
-        "fence.cpp",
-        "formats.cpp",
-        "utils.cpp",
+    shared_libs: [
+        "libqservice",
+        "liblog",
+        "libutils",
+        "libcutils",
+        "libbinder",
+        "libqdutils",
     ],
 
-    shared_libs: ["libdisplaydebug"],
+    cflags: [
+        "-DLOG_TAG=\"qdhdmi_cec\"",
+        "-Wno-sign-conversion",
+    ],
+    srcs: [
+        "qhdmi_cec.cpp",
+        "QHDMIClient.cpp",
+    ],
 }

@@ -8,7 +8,7 @@ PRODUCT_PACKAGES += \
     android.hardware.graphics.mapper@4.0-impl-qti-display \
     vendor.qti.hardware.display.allocator-service \
     vendor.qti.hardware.display.composer-service \
-    gralloc.$(TARGET_BOARD_PLATFORM) \
+    gralloc.qcom \
     libsdmcore \
     libsdmutils \
     libqdMetaData \
@@ -92,14 +92,19 @@ endif
 
 QMAA_ENABLED_HAL_MODULES += display
 ifeq ($(TARGET_USES_QMAA),true)
-ifeq ($(TARGET_USES_QMAA_OVERRIDE_DISPLAY),true)
-PRODUCT_PROPERTY_OVERRIDES += \
-    vendor.display.enable_null_display=0
-else
-TARGET_IS_HEADLESS := true
-PRODUCT_PROPERTY_OVERRIDES += \
-    vendor.display.enable_null_display=1
-endif
+    ifeq ($(TARGET_USES_QMAA_OVERRIDE_DISPLAY),true)
+        PRODUCT_PROPERTY_OVERRIDES += \
+            vendor.display.enable_null_display=0
+        #Modules that shouldn't be enabled in QMAA go here
+        PRODUCT_PACKAGES += libdrmutils
+        PRODUCT_PACKAGES += libsdedrm
+        PRODUCT_PACKAGES += libgpu_tonemapper
+    else
+    TARGET_IS_HEADLESS := true
+    SOONG_CONFIG_qtidisplay_headless := true
+    PRODUCT_PROPERTY_OVERRIDES += \
+        vendor.display.enable_null_display=1
+    endif
 endif
 
 # Properties using default value:
