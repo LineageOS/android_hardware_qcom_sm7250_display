@@ -198,6 +198,10 @@ class HWCSession : hwc2_device_t, HWCUEventListener, public qClient::BnQClient,
                                  uint32_t *capabilities);
   int32_t GetDisplayCapabilities_2_4(hwc2_display_t display, uint32_t *outNumCapabilities,
                                      uint32_t *capabilities);
+  int32_t GetDisplayCapabilities(hwc2_display_t display,
+                                 hidl_vec<HwcDisplayCapability> *capabilities);
+  int32_t GetDisplayCapabilities2_3(hwc2_display_t display,
+                                    uint32_t *outNumCapabilities, uint32_t *outCapabilities);
   int32_t GetDisplayBrightnessSupport(hwc2_display_t display, bool *outSupport);
   int32_t SetDisplayBrightness(hwc2_display_t display, float brightness);
   void WaitForResources(bool wait_for_resources, hwc2_display_t active_builtin_id,
@@ -367,13 +371,16 @@ class HWCSession : hwc2_device_t, HWCUEventListener, public qClient::BnQClient,
     virtual int IsHDRSupported(uint32_t disp_id, bool *supported);
     virtual int IsWCGSupported(uint32_t disp_id, bool *supported);
     virtual int SetLayerAsMask(uint32_t disp_id, uint64_t layer_id);
-    virtual int GetDebugProperty(const std::string prop_name, std::string value);
+    virtual int GetDebugProperty(const std::string prop_name, std::string value) {return -EINVAL;}
+    virtual int GetDebugProperty(const std::string prop_name, std::string *value);
     virtual int GetActiveBuiltinDisplayAttributes(DisplayConfig::Attributes *attr);
     virtual int SetPanelLuminanceAttributes(uint32_t disp_id, float min_lum, float max_lum);
     virtual int IsBuiltInDisplay(uint32_t disp_id, bool *is_builtin);
     virtual int IsAsyncVDSCreationSupported(bool *supported);
     virtual int CreateVirtualDisplay(uint32_t width, uint32_t height, int format);
-    virtual int GetSupportedDSIBitClks(uint32_t disp_id, std::vector<uint64_t> bit_clks);
+    virtual int GetSupportedDSIBitClks(uint32_t disp_id,
+                                       std::vector<uint64_t> bit_clks) {return -EINVAL;}
+    virtual int GetSupportedDSIBitClks(uint32_t disp_id, std::vector<uint64_t> *bit_clks);
     virtual int GetDSIClk(uint32_t disp_id, uint64_t *bit_clk);
     virtual int SetDSIClk(uint32_t disp_id, uint64_t bit_clk);
     virtual int SetCWBOutputBuffer(uint32_t disp_id, const DisplayConfig::Rect rect,
