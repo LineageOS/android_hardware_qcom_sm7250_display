@@ -678,6 +678,8 @@ DisplayError DisplayBase::SetActiveConfig(uint32_t index) {
     return error;
   }
 
+  DLOGI("Active configuration changed to: %d", index);
+
   return ReconfigureDisplay();
 }
 
