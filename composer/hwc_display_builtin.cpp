@@ -28,17 +28,18 @@
 */
 
 #include <cutils/properties.h>
-#include <sync/sync.h>
+#include <cutils/sockets.h>
 #include <utils/constants.h>
 #include <utils/debug.h>
 #include <utils/utils.h>
 #include <stdarg.h>
+#include <sync/sync.h>
 #include <sys/mman.h>
 
 #include <map>
+#include <iostream>
 #include <string>
 #include <vector>
-#include <cutils/sockets.h>
 
 #include "hwc_display_builtin.h"
 #include "hwc_debugger.h"
@@ -59,52 +60,26 @@ static void SetRect(LayerRect &src_rect, GLRect *target) {
 
 static std::string LoadPanelGammaCalibration() {
   constexpr char file[] = "/mnt/vendor/persist/display/gamma_calib_data.cal";
-  int fd = open(file, O_RDONLY);
-  if (fd < 0) {
+  std::ifstream fin(file);
+
+  if (!fin.is_open()) {
     DLOGW("Unable to open gamma calibration '%s', error = %s", file, strerror(errno));
     return {};
   }
 
-  struct stat info;
-  if (fstat(fd, &info) == -1) {
-    DLOGE("Unable to stat gamma calibration '%s', error = %s", file, strerror(errno));
-    close(fd);
-    return {};
+  std::string data, gamma;
+  while (std::getline(fin, data)) {
+    gamma.append(data.c_str());
+    gamma.append(" ");
+  }
+  fin.close();
+
+  /* eliminate space character in the last byte */
+  if (!gamma.empty()) {
+    gamma.pop_back();
   }
 
-  std::vector<char> buf(info.st_size);
-  char *ptr = buf.data();
-  ssize_t len;
-  while (((len = read(fd, ptr, info.st_size - (ptr - buf.data()))) != 0)) {
-    if (len > 0) {
-      ptr += len;
-    } else if ((errno != EINTR) && (errno != EAGAIN)) {
-      break;
-    }
-  }
-  close(fd);
-
-  if (len == 0) {
-    char *token, *saveptr = nullptr;
-    const char *delim = "\r\n";
-    std::string gamma;
-
-    token = strtok_r(buf.data(), delim, &saveptr);
-    while (token) {
-      gamma.append(token);
-      gamma.append(" ");
-      token = strtok_r(NULL, delim, &saveptr);
-    }
-
-    if (!gamma.empty()) {
-      gamma.pop_back();
-    }
-
-    return gamma;
-  } else {
-    DLOGE("Failed to read gamma calibration data, error = %s", strerror(errno));
-    return {};
-  }
+  return gamma;
 }
 
 static DisplayError WritePanelGammaTableToDriver(const std::string &gamma_data) {
