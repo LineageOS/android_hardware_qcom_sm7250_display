@@ -60,19 +60,20 @@ static void SetRect(LayerRect &src_rect, GLRect *target) {
 
 static std::string LoadPanelGammaCalibration() {
   constexpr char file[] = "/mnt/vendor/persist/display/gamma_calib_data.cal";
-  std::ifstream fin(file);
+  std::ifstream ifs(file);
 
-  if (!fin.is_open()) {
+  if (!ifs.is_open()) {
     DLOGW("Unable to open gamma calibration '%s', error = %s", file, strerror(errno));
     return {};
   }
 
-  std::string data, gamma;
-  while (std::getline(fin, data)) {
-    gamma.append(data.c_str());
+  std::string raw_data, gamma;
+  while (std::getline(ifs, raw_data, '\r')) {
+    gamma.append(raw_data.c_str());
     gamma.append(" ");
+    std::getline(ifs, raw_data);
   }
-  fin.close();
+  ifs.close();
 
   /* eliminate space character in the last byte */
   if (!gamma.empty()) {
