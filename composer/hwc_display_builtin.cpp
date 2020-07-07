@@ -27,6 +27,7 @@
 * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
+#include <android-base/file.h>
 #include <cutils/properties.h>
 #include <cutils/sockets.h>
 #include <utils/constants.h>
@@ -48,8 +49,6 @@
 #define __CLASS__ "HWCDisplayBuiltIn"
 
 namespace sdm {
-
-static int EnableLTM();
 
 static void SetRect(LayerRect &src_rect, GLRect *target) {
   target->left = src_rect.left;
@@ -251,10 +250,6 @@ HWC2::Error HWCDisplayBuiltIn::Validate(uint32_t *out_num_types, uint32_t *out_n
   DisplayError error = kErrorNone;
 
   DTRACE_SCOPED();
-
-  if (!boot_animation_completed_) {
-    ProcessBootAnimCompleted();
-  }
 
   if (display_paused_ || (!is_primary_ && active_secure_sessions_[kSecureDisplay])) {
     MarkLayersForGPUBypass();
@@ -548,27 +543,20 @@ HWC2::Error HWCDisplayBuiltIn::Present(shared_ptr<Fence> *out_retire_fence) {
     }
   }
 
-  if (CC_UNLIKELY(!has_init_light_server_)) {
-    using ILight = ::hardware::google::light::V1_0::ILight;
-    hardware_ILight_ = ILight::getService();
-    if (hardware_ILight_ != nullptr) {
-      hardware_ILight_->setHbm(false);
-    } else {
-      DLOGE("failed to get vendor light service");
-    }
-
+  if (CC_UNLIKELY(!has_config_hbm_threshold_)) {
     uint32_t panel_x, panel_y;
     GetPanelResolution(&panel_x, &panel_y);
     hbm_threshold_px_ = float(panel_x * panel_y) * hbm_threshold_pct_;
     DLOGI("Configure hbm_threshold_px_ to %f", hbm_threshold_px_);
 
-    has_init_light_server_ = true;
+    has_config_hbm_threshold_ = true;
   }
 
   const bool enable_hbm(hdr_largest_layer_px_ > hbm_threshold_px_);
-  if (high_brightness_mode_ != enable_hbm && hardware_ILight_ != nullptr) {
-    using ::android::hardware::light::V2_0::Status;
-    if (Status::SUCCESS == hardware_ILight_->setHbm(enable_hbm)) {
+  if (high_brightness_mode_ != enable_hbm) {
+    HbmState state = enable_hbm ? HbmState::HDR : HbmState::OFF;
+    auto status = SetHbm(state, HWC);
+    if (status == HWC2::Error::None) {
       high_brightness_mode_ = enable_hbm;
     } else {
       DLOGE("failed to setHbm to %d", enable_hbm);
@@ -1551,31 +1539,73 @@ bool HWCDisplayBuiltIn::HasReadBackBufferSupport() {
   return fixed_info.readback_supported;
 }
 
-void HWCDisplayBuiltIn::ProcessBootAnimCompleted() {
-  constexpr size_t num_bootup_layers = 2;
-  if (layer_set_.size() > num_bootup_layers) {
-    if (!EnableLTM()) {
-      DLOGI("Enable LTM successfully");
-      boot_animation_completed_ = true;
+HWC2::Error HWCDisplayBuiltIn::ApplyHbmLocked() {
+  if (!mHasHbmNode)
+    return HWC2::Error::Unsupported;
+
+  HbmState state = HbmState::OFF;
+  for (auto req : mHbmSates) {
+    if (req == HbmState::SUNLIGHT) {
+      state = HbmState::SUNLIGHT;
+      break;
+    } else if (req == HbmState::HDR) {
+      state = HbmState::HDR;
     }
   }
+
+  if (state == mCurHbmState)
+    return HWC2::Error::None;
+
+  std::string action = std::to_string(static_cast<int>(state));
+  if (!android::base::WriteStringToFile(action, kHighBrightnessModeNode)) {
+    DLOGE("Failed to write hbm node = %s, error = %s ", kHighBrightnessModeNode, strerror(errno));
+  } else {
+    DLOGI("write %s to HBM sysfs file succeeded", action.c_str());
+  }
+
+  mCurHbmState = state;
+
+  return HWC2::Error::None;
 }
 
-static int EnableLTM() {
-  const char *ltm_on_cmd = "Ltm:On:Primary:Auto";
+bool HWCDisplayBuiltIn::IsHbmSupported() {
+  if (!mHasHbmNode)
+    return false;
 
-  int pps_socket = socket_local_client("pps", ANDROID_SOCKET_NAMESPACE_RESERVED, SOCK_STREAM);
-  if (pps_socket < 0) {
-    DLOGE("Connecting to pps socket failed, error = %s", strerror(errno));
-    return -EINVAL;
+  bool is_hbm_supported = false;
+  std::string buffer;
+  if (!android::base::ReadFileToString(kHighBrightnessModeNode, &buffer)) {
+    DLOGE("Failed to read hbm node = %s, error = %s ", kHighBrightnessModeNode, strerror(errno));
+  } else if (buffer == "unsupported") {
+    DLOGI("kernel driver does not support hbm");
+  } else {
+    is_hbm_supported = true;
   }
 
-  int ret = write(pps_socket, ltm_on_cmd, strlen(ltm_on_cmd));
-  if (ret < 0) {
-    DLOGE("Failed to enable LTM, error = %s", strerror(errno));
-    return -EINVAL;
+  return is_hbm_supported;
+}
+
+HWC2::Error HWCDisplayBuiltIn::SetHbm(HbmState state, HbmClient client) {
+  auto status = HWC2::Error::None;
+  if (client >= CLIENT_MAX)
+    return HWC2::Error::BadParameter;
+
+  std::unique_lock<decltype(hbm_mutex)> lk(hbm_mutex);
+
+  /* save and apply the request state */
+  if (mHbmSates[client] != state) {
+    mHbmSates[client] = state;
+
+    status = ApplyHbmLocked();
+    if (INT32(status) != HWC2_ERROR_NONE)
+      DLOGE("Failed to apply hbm node, error = %d", status);
   }
-  return 0;
+
+  return status;
+}
+
+HbmState HWCDisplayBuiltIn::GetHbm() {
+  return mCurHbmState;
 }
 
 }  // namespace sdm
