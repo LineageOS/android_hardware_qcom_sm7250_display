@@ -21,6 +21,7 @@
 #define __HWC_DISPLAY_H__
 
 #include <QService.h>
+#include <aidl/com/google/hardware/pixel/display/BnDisplay.h>
 #include <android/hardware/graphics/common/1.2/types.h>
 #include <core/core_interface.h>
 #include <hardware/hwcomposer.h>
@@ -54,6 +55,8 @@ using VsyncPeriodChangeConstraints = composer_V2_4::IComposerClient::VsyncPeriod
 using VsyncPeriodChangeTimeline = composer_V2_4::VsyncPeriodChangeTimeline;
 using VsyncPeriodNanos = composer_V2_4::VsyncPeriodNanos;
 using HwcContentType = composer_V2_4::IComposerClient::ContentType;
+using HbmState = ::aidl::com::google::hardware::pixel::display::HbmState;
+using LbeState = ::aidl::com::google::hardware::pixel::display::LbeState;
 
 namespace sdm {
 
@@ -162,6 +165,12 @@ class HWCDisplay : public DisplayEventHandler {
   enum PanelGammaSource {
     kGammaDefault,      // Resotre gamma table to default
     kGammaCalibration,  // Update gamma table from calibration file
+  };
+
+  enum HbmClient {
+    HWC = 0,
+    APP,
+    CLIENT_MAX,
   };
 
   struct HWCLayerStack {
@@ -427,6 +436,10 @@ class HWCDisplay : public DisplayEventHandler {
 
   HWC2::Error SetDisplayElapseTime(uint64_t time);
   virtual bool HasReadBackBufferSupport() { return false; }
+
+  virtual bool IsHbmSupported() { return false; }
+  virtual HWC2::Error SetHbm(HbmState state, HbmClient client) { return HWC2::Error::None; }
+  virtual HbmState GetHbm() { return HbmState::OFF; }
 
  protected:
   static uint32_t throttling_refresh_rate_;

@@ -303,6 +303,15 @@ class HWCSession : hwc2_device_t, HWCUEventListener, public qClient::BnQClient,
   static Locker hdr_locker_[HWCCallbacks::kNumDisplays];
   static Locker display_config_locker_;
 
+  void RegisterDisplayCallback();
+  bool IsHbmSupported();
+  void SetHbmState(HbmState state);
+  HbmState GetHbmState();
+  bool IsLbeSupported();
+  void SetLbeState(LbeState state);
+  void SetLbeAmbientLight(int value);
+  LbeState GetLbeState();
+
  private:
   class CWB {
    public:
@@ -510,6 +519,8 @@ class HWCSession : hwc2_device_t, HWCUEventListener, public qClient::BnQClient,
   void PerformQsyncCallback(hwc2_display_t display);
   bool isSmartPanelConfig(uint32_t disp_id, uint32_t config_id);
 
+  int SendLTMCommand(const char *cmd);
+
   CoreInterface *core_intf_ = nullptr;
   HWCDisplay *hwc_display_[HWCCallbacks::kNumDisplays] = {nullptr};
   HWCCallbacks callbacks_;
@@ -555,6 +566,18 @@ class HWCSession : hwc2_device_t, HWCUEventListener, public qClient::BnQClient,
   bool power_state_transition_[HWCCallbacks::kNumDisplays] = {};
   std::bitset<HWCCallbacks::kNumDisplays> display_ready_;
   bool secure_session_active_ = false;
+
+  int32_t is_lbe_supported_ = 0;
+  LbeState lbe_cur_state_ = LbeState::OFF;
+  int pps_socket_ = -1;
+  int8_t pps_retry = 5;
+  static constexpr const char *ltm_on_cmd_ = "Ltm:On:Primary:Auto";
+  static constexpr const char *ltm_off_cmd_ = "Ltm:Off:Primary";
+  static constexpr const char *ltm_lux_cmd_ = "Ltm:Als:Primary:";
+  static constexpr const char *ltm_default_mode_cmd_ = "Ltm:UserMode:Primary:default";
+  static constexpr const char *ltm_hbm_mode_cmd_ = "Ltm:UserMode:Primary:hbm";
+  static constexpr const char *ltm_power_save_mode_cmd_ = "Ltm:UserMode:Primary:power_save";
+  static constexpr const char *ltm_get_mode_cmd_ = "Ltm:GetUserMode:Primary";
 };
 }  // namespace sdm
 
