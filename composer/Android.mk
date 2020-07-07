@@ -35,7 +35,9 @@ LOCAL_SHARED_LIBRARIES        := libhistogram libbinder libhardware libutils lib
                                  libdisplayconfig.qti \
                                  libdrm libthermalclient
 
-LOCAL_SHARED_LIBRARIES        += hardware.google.light@1.0
+LOCAL_SHARED_LIBRARIES        += com.google.hardware.pixel.display-ndk_platform \
+                                 libbinder_ndk \
+                                 libbase
 
 LOCAL_SRC_FILES               := QtiComposer.cpp QtiComposerClient.cpp service.cpp \
                                  QtiComposerHandleImporter.cpp \
@@ -64,7 +66,8 @@ LOCAL_SRC_FILES               := QtiComposer.cpp QtiComposerClient.cpp service.c
                                  gl_color_convert.cpp \
                                  gl_color_convert_impl.cpp \
                                  gl_layer_stitch.cpp \
-                                 gl_layer_stitch_impl.cpp
+                                 gl_layer_stitch_impl.cpp \
+                                 pixel-display.cpp
 
 LOCAL_INIT_RC                 := vendor.qti.hardware.display.composer-service.rc
 ifneq ($(TARGET_HAS_LOW_RAM),true)
@@ -72,5 +75,7 @@ LOCAL_VINTF_FRAGMENTS         := vendor.qti.hardware.display.composer-service.xm
 else
 LOCAL_VINTF_FRAGMENTS         := vendor.qti.hardware.display.composer-service-low-ram.xml
 endif
+
+LOCAL_VINTF_FRAGMENTS         += pixel-display-default.xml
 
 include $(BUILD_EXECUTABLE)
