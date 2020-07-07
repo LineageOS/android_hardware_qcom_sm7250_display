@@ -652,7 +652,7 @@ Return<Error> QtiComposerClient::setReadbackBuffer(uint64_t display, const hidl_
   }
 
   const native_handle_t* readbackBuffer;
-  getDisplayReadbackBuffer(display, buffer.getNativeHandle(), &readbackBuffer);
+  error = getDisplayReadbackBuffer(display, buffer.getNativeHandle(), &readbackBuffer);
   if (error != Error::NONE) {
     return error;
   }
