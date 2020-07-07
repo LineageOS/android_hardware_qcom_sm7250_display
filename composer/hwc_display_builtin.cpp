@@ -49,8 +49,6 @@
 
 namespace sdm {
 
-static int EnableLTM();
-
 static void SetRect(LayerRect &src_rect, GLRect *target) {
   target->left = src_rect.left;
   target->top = src_rect.top;
@@ -251,10 +249,6 @@ HWC2::Error HWCDisplayBuiltIn::Validate(uint32_t *out_num_types, uint32_t *out_n
   DisplayError error = kErrorNone;
 
   DTRACE_SCOPED();
-
-  if (!boot_animation_completed_) {
-    ProcessBootAnimCompleted();
-  }
 
   if (display_paused_ || (!is_primary_ && active_secure_sessions_[kSecureDisplay])) {
     MarkLayersForGPUBypass();
@@ -1549,33 +1543,6 @@ bool HWCDisplayBuiltIn::HasReadBackBufferSupport() {
   display_intf_->GetConfig(&fixed_info);
 
   return fixed_info.readback_supported;
-}
-
-void HWCDisplayBuiltIn::ProcessBootAnimCompleted() {
-  constexpr size_t num_bootup_layers = 2;
-  if (layer_set_.size() > num_bootup_layers) {
-    if (!EnableLTM()) {
-      DLOGI("Enable LTM successfully");
-      boot_animation_completed_ = true;
-    }
-  }
-}
-
-static int EnableLTM() {
-  const char *ltm_on_cmd = "Ltm:On:Primary:Auto";
-
-  int pps_socket = socket_local_client("pps", ANDROID_SOCKET_NAMESPACE_RESERVED, SOCK_STREAM);
-  if (pps_socket < 0) {
-    DLOGE("Connecting to pps socket failed, error = %s", strerror(errno));
-    return -EINVAL;
-  }
-
-  int ret = write(pps_socket, ltm_on_cmd, strlen(ltm_on_cmd));
-  if (ret < 0) {
-    DLOGE("Failed to enable LTM, error = %s", strerror(errno));
-    return -EINVAL;
-  }
-  return 0;
 }
 
 }  // namespace sdm
