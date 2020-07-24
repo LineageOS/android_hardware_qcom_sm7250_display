@@ -3680,6 +3680,8 @@ int HWCSession::SendLTMCommand(const char *cmd) {
     DLOGE("Failed to send LTM cmd, error = %s", strerror(errno));
     return -EINVAL;
   }
+  usleep(1000);
+
   return 0;
 }
 
