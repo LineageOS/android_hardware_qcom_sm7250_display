@@ -204,7 +204,15 @@ uint32_t GetBppForUncompressedRGB(int format) {
       bpp = 2;
       break;
     default:
-      ALOGE("Error : %s New format request = 0x%x", __FUNCTION__, format);
+      // Because ag/12418822 to fix GCA camera-Berlin
+      // long shot issue (b/165335520) will cause log
+      // spew here, add below protected condition to avoid
+      // the log spew first and keep tracking the root cause
+      // on b/166142588.
+      if (format != HAL_PIXEL_FORMAT_R_8)
+      {
+        ALOGE("Error : %s New format request = 0x%x", __FUNCTION__, format);
+      }
       break;
   }
 
