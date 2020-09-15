@@ -201,18 +201,14 @@ uint32_t GetBppForUncompressedRGB(int format) {
     case HAL_PIXEL_FORMAT_BGR_565:
     case HAL_PIXEL_FORMAT_RGBA_5551:
     case HAL_PIXEL_FORMAT_RGBA_4444:
+    case HAL_PIXEL_FORMAT_RG_88:
       bpp = 2;
       break;
+    case HAL_PIXEL_FORMAT_R_8:
+      bpp = 1;
+      break;
     default:
-      // Because ag/12418822 to fix GCA camera-Berlin
-      // long shot issue (b/165335520) will cause log
-      // spew here, add below protected condition to avoid
-      // the log spew first and keep tracking the root cause
-      // on b/166142588.
-      if (format != HAL_PIXEL_FORMAT_R_8)
-      {
-        ALOGE("Error : %s New format request = 0x%x", __FUNCTION__, format);
-      }
+      ALOGE("Error : %s New format request = 0x%x", __FUNCTION__, format);
       break;
   }
 

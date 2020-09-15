@@ -194,6 +194,10 @@ ADRENOPIXELFORMAT AdrenoMemInfo::GetGpuPixelFormat(int hal_format) {
       return ADRENO_PIXELFORMAT_R5G5B5A1;
     case HAL_PIXEL_FORMAT_RGBA_4444:
       return ADRENO_PIXELFORMAT_R4G4B4A4;
+    case HAL_PIXEL_FORMAT_R_8:
+      return ADRENO_PIXELFORMAT_R8_UNORM;
+    case HAL_PIXEL_FORMAT_RG_88:
+      return ADRENO_PIXELFORMAT_R8G8_UNORM;
     case HAL_PIXEL_FORMAT_RGBA_1010102:
        return ADRENO_PIXELFORMAT_R10G10B10A2_UNORM;
     case HAL_PIXEL_FORMAT_RGBX_1010102:
@@ -282,15 +286,7 @@ ADRENOPIXELFORMAT AdrenoMemInfo::GetGpuPixelFormat(int hal_format) {
     case HAL_PIXEL_FORMAT_COMPRESSED_SRGB8_ALPHA8_ASTC_12x12_KHR:
       return ADRENO_PIXELFORMAT_ASTC_12X12_SRGB;
     default:
-      // Because ag/12418822 to fix GCA camera-Berlin
-      // long shot issue (b/165335520) will cause log
-      // spew here, add below protected condition to avoid
-      // the log spew first and keep tracking the root cause
-      // on b/166142588.
-      if (hal_format != HAL_PIXEL_FORMAT_R_8)
-      {
-        ALOGE("%s: No map for format: 0x%x", __FUNCTION__, hal_format);
-      }
+      ALOGE("%s: No map for format: 0x%x", __FUNCTION__, hal_format);
       break;
   }
 
