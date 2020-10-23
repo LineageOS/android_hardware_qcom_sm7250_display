@@ -45,12 +45,21 @@ PRODUCT_PROPERTY_OVERRIDES += \
     vendor.display.normal_noc_efficiency_factor=0.85 \
     vendor.display.camera_noc_efficiency_factor=0.70 \
     vendor.display.disable_layer_stitch=0 \
-    vendor.display.secure_preview_buffer_format=420_sp
+    vendor.display.secure_preview_buffer_format=420_sp \
+    vendor.gralloc.secure_preview_buffer_format=420_sp \
+    debug.sf.enable_advanced_sf_phase_offset=1 \
+    debug.sf.high_fps_late_sf_phase_offset_ns=-5000000 \
+    debug.sf.high_fps_early_phase_offset_ns=-5000000 \
+    debug.sf.high_fps_early_gl_phase_offset_ns=-5000000
 endif
 
 ifeq ($(TARGET_BOARD_PLATFORM),kona)
 PRODUCT_PROPERTY_OVERRIDES += \
-    debug.sf.enable_gl_backpressure=1
+    debug.sf.enable_gl_backpressure=1 \
+    debug.sf.enable_advanced_sf_phase_offset=1 \
+    debug.sf.high_fps_late_sf_phase_offset_ns=-4000000 \
+    debug.sf.high_fps_early_phase_offset_ns=-4000000 \
+    debug.sf.high_fps_early_gl_phase_offset_ns=-4000000
 endif
 
 ifneq ($(PLATFORM_VERSION), 10)
@@ -63,6 +72,7 @@ PRODUCT_DEFAULT_PROPERTY_OVERRIDES += ro.surface_flinger.has_HDR_display=true
 PRODUCT_DEFAULT_PROPERTY_OVERRIDES += ro.surface_flinger.use_color_management=true
 PRODUCT_DEFAULT_PROPERTY_OVERRIDES += ro.surface_flinger.wcg_composition_dataspace=143261696
 PRODUCT_DEFAULT_PROPERTY_OVERRIDES += ro.surface_flinger.protected_contents=true
+PRODUCT_DEFAULT_PROPERTY_OVERRIDES += ro.surface_flinger.force_hwc_copy_for_virtual_displays=true
 
 ifneq (,$(filter userdebug eng, $(TARGET_BUILD_VARIANT)))
 # Recovery is enabled, logging is enabled
