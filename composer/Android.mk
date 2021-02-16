@@ -35,7 +35,7 @@ LOCAL_SHARED_LIBRARIES        := libhistogram libbinder libhardware libutils lib
                                  libdisplayconfig.qti \
                                  libdrm libthermalclient
 
-LOCAL_SHARED_LIBRARIES        += com.google.hardware.pixel.display-ndk_platform \
+LOCAL_SHARED_LIBRARIES        += com.google.hardware.pixel.display-V1-ndk_platform \
                                  libbinder_ndk \
                                  libbase
 
