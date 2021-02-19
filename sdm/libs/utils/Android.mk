@@ -3,6 +3,8 @@ include $(CLEAR_VARS)
 include $(LOCAL_PATH)/../../../common.mk
 
 LOCAL_MODULE                  := libsdmutils
+LOCAL_LICENSE_KINDS           := SPDX-license-identifier-BSD
+LOCAL_LICENSE_CONDITIONS      := notice
 LOCAL_SANITIZE                := integer_overflow
 LOCAL_VENDOR_MODULE           := true
 LOCAL_MODULE_TAGS             := optional
