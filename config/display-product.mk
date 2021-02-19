@@ -46,20 +46,12 @@ PRODUCT_PROPERTY_OVERRIDES += \
     vendor.display.camera_noc_efficiency_factor=0.70 \
     vendor.display.disable_layer_stitch=0 \
     vendor.display.secure_preview_buffer_format=420_sp \
-    vendor.gralloc.secure_preview_buffer_format=420_sp \
-    debug.sf.enable_advanced_sf_phase_offset=1 \
-    debug.sf.high_fps_late_sf_phase_offset_ns=-5000000 \
-    debug.sf.high_fps_early_phase_offset_ns=-5000000 \
-    debug.sf.high_fps_early_gl_phase_offset_ns=-5000000
+    vendor.gralloc.secure_preview_buffer_format=420_sp
 endif
 
 ifeq ($(TARGET_BOARD_PLATFORM),kona)
 PRODUCT_PROPERTY_OVERRIDES += \
-    debug.sf.enable_gl_backpressure=1 \
-    debug.sf.enable_advanced_sf_phase_offset=1 \
-    debug.sf.high_fps_late_sf_phase_offset_ns=-4000000 \
-    debug.sf.high_fps_early_phase_offset_ns=-4000000 \
-    debug.sf.high_fps_early_gl_phase_offset_ns=-4000000
+    debug.sf.enable_gl_backpressure=1
 endif
 
 ifneq ($(PLATFORM_VERSION), 10)
