@@ -5,6 +5,8 @@ include $(CLEAR_VARS)
 common_header_export_path := qcom/display
 
 LOCAL_MODULE              := libsdedrm
+LOCAL_LICENSE_KINDS       := SPDX-license-identifier-BSD
+LOCAL_LICENSE_CONDITIONS  := notice
 LOCAL_SANITIZE            := integer_overflow
 LOCAL_MODULE_TAGS         := optional
 LOCAL_SHARED_LIBRARIES    := libdrm libdrmutils libdisplaydebug libcutils

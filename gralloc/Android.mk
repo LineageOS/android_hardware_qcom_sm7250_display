@@ -14,6 +14,8 @@ include $(LIBION_HEADER_PATH_WRAPPER)
 include $(CLEAR_VARS)
 
 LOCAL_MODULE                  := gralloc.$(TARGET_BOARD_PLATFORM)
+LOCAL_LICENSE_KINDS           := SPDX-license-identifier-Apache-2.0 SPDX-license-identifier-BSD legacy_not_a_contribution
+LOCAL_LICENSE_CONDITIONS      := by_exception_only not_allowed notice
 LOCAL_SANITIZE                := integer_overflow
 LOCAL_VENDOR_MODULE           := true
 LOCAL_MODULE_RELATIVE_PATH    := hw
@@ -37,6 +39,8 @@ include $(BUILD_SHARED_LIBRARY)
 #libgrallocutils
 include $(CLEAR_VARS)
 LOCAL_MODULE                  := libgrallocutils
+LOCAL_LICENSE_KINDS           := SPDX-license-identifier-Apache-2.0 SPDX-license-identifier-BSD legacy_not_a_contribution
+LOCAL_LICENSE_CONDITIONS      := by_exception_only not_allowed notice
 LOCAL_VENDOR_MODULE           := true
 LOCAL_SANITIZE                := integer_overflow
 LOCAL_MODULE_TAGS             := optional
@@ -57,6 +61,8 @@ include $(BUILD_SHARED_LIBRARY)
 #libgralloccore
 include $(CLEAR_VARS)
 LOCAL_MODULE                  := libgralloccore
+LOCAL_LICENSE_KINDS           := SPDX-license-identifier-Apache-2.0 SPDX-license-identifier-BSD legacy_not_a_contribution
+LOCAL_LICENSE_CONDITIONS      := by_exception_only not_allowed notice
 LOCAL_SANITIZE                := integer_overflow
 LOCAL_VENDOR_MODULE           := true
 LOCAL_MODULE_TAGS             := optional
@@ -80,6 +86,8 @@ include $(BUILD_SHARED_LIBRARY)
 #mapper
 include $(CLEAR_VARS)
 LOCAL_MODULE                  := android.hardware.graphics.mapper@3.0-impl-qti-display
+LOCAL_LICENSE_KINDS           := SPDX-license-identifier-Apache-2.0 SPDX-license-identifier-BSD legacy_not_a_contribution
+LOCAL_LICENSE_CONDITIONS      := by_exception_only not_allowed notice
 LOCAL_SANITIZE                := integer_overflow
 LOCAL_VENDOR_MODULE           := true
 LOCAL_MODULE_RELATIVE_PATH    := hw
@@ -108,6 +116,8 @@ include $(BUILD_SHARED_LIBRARY)
 ifneq ($(TARGET_USES_GRALLOC4),false)
 include $(CLEAR_VARS)
 LOCAL_MODULE                  := android.hardware.graphics.mapper@4.0-impl-qti-display
+LOCAL_LICENSE_KINDS           := SPDX-license-identifier-Apache-2.0 SPDX-license-identifier-BSD legacy_not_a_contribution
+LOCAL_LICENSE_CONDITIONS      := by_exception_only not_allowed notice
 LOCAL_SANITIZE                := integer_overflow
 LOCAL_VENDOR_MODULE           := true
 LOCAL_MODULE_RELATIVE_PATH    := hw
@@ -140,6 +150,8 @@ endif
 #allocator
 include $(CLEAR_VARS)
 LOCAL_MODULE                  := vendor.qti.hardware.display.allocator-service
+LOCAL_LICENSE_KINDS           := SPDX-license-identifier-Apache-2.0 SPDX-license-identifier-BSD legacy_not_a_contribution
+LOCAL_LICENSE_CONDITIONS      := by_exception_only not_allowed notice
 LOCAL_SANITIZE                := integer_overflow
 LOCAL_VENDOR_MODULE           := true
 LOCAL_MODULE_RELATIVE_PATH    := hw
