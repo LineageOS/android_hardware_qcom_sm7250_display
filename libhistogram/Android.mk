@@ -16,6 +16,8 @@ LOCAL_PATH:= $(call my-dir)
 include $(CLEAR_VARS)
 
 LOCAL_MODULE := libhistogram
+LOCAL_LICENSE_KINDS := SPDX-license-identifier-Apache-2.0
+LOCAL_LICENSE_CONDITIONS := notice
 LOCAL_VENDOR_MODULE := true
 LOCAL_MODULE_TAGS := optional
 LOCAL_HEADER_LIBRARIES := display_headers
@@ -35,6 +37,8 @@ include $(CLEAR_VARS)
 
 LOCAL_HEADER_LIBRARIES := display_headers
 LOCAL_MODULE := color_sampling_tool
+LOCAL_LICENSE_KINDS := SPDX-license-identifier-Apache-2.0
+LOCAL_LICENSE_CONDITIONS := notice
 LOCAL_SRC_FILES := color_sampling_tool.cpp
 LOCAL_SHARED_LIBRARIES := libhistogram libdrm liblog libcutils libutils libbase
 LOCAL_C_INCLUDES          := $(TARGET_OUT_INTERMEDIATES)/KERNEL_OBJ/usr/include/ \
@@ -52,6 +56,8 @@ include $(CLEAR_VARS)
 
 LOCAL_HEADER_LIBRARIES := display_headers
 LOCAL_MODULE := color_sampling_test
+LOCAL_LICENSE_KINDS := SPDX-license-identifier-Apache-2.0
+LOCAL_LICENSE_CONDITIONS := notice
 LOCAL_SRC_FILES := ringbuffer_test.cpp
 LOCAL_STATIC_LIBRARIES := libgtest libgmock
 LOCAL_SHARED_LIBRARIES := libhistogram libdrm liblog libcutils libutils libbase
