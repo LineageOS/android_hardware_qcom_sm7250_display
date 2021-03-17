@@ -47,7 +47,7 @@
 #define IOCTL_LOGE(ioctl, type) \
   DLOGE("ioctl %s, device = %d errno = %d, desc = %s", #ioctl, type, errno, strerror(errno))
 
-#define UI_FBID_LIMIT 3
+#define UI_FBID_LIMIT 4
 #define VIDEO_FBID_LIMIT 16
 #define OFFLINE_ROTATOR_FBID_LIMIT 2
 
@@ -251,6 +251,7 @@ class HWDeviceDRM : public HWInterface {
   uint32_t dest_scaler_blocks_used_ = 0;  // Dest scaler blocks in use by this HWDeviceDRM instance.
   // Destination scaler blocks in use by all HWDeviceDRM instances.
   static std::atomic<uint32_t> hw_dest_scaler_blocks_used_;
+  bool null_display_commit_ = false;
 
  private:
   void SetDisplaySwitchMode(uint32_t index);
