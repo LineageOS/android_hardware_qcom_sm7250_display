@@ -201,9 +201,9 @@ int HWCDisplayBuiltIn::Init() {
   color_mode_ = new HWCColorMode(display_intf_);
   color_mode_->Init();
 
-  int optimize_refresh = 0;
-  HWCDebugHandler::Get()->GetProperty(ENABLE_OPTIMIZE_REFRESH, &optimize_refresh);
-  enable_optimize_refresh_ = (optimize_refresh == 1);
+  int value = 0;
+  HWCDebugHandler::Get()->GetProperty(ENABLE_OPTIMIZE_REFRESH, &value);
+  enable_optimize_refresh_ = (value == 1);
   if (enable_optimize_refresh_) {
     DLOGI("Drop redundant drawcycles %" PRIu64 , id_);
   }
@@ -227,7 +227,19 @@ int HWCDisplayBuiltIn::Init() {
                       &window_rect_.right, &window_rect_.bottom) != kErrorUndefined;
     DLOGI("Window rect : [%f %f %f %f]", window_rect_.left, window_rect_.top,
           window_rect_.right, window_rect_.bottom);
+
+    value = 0;
+    HWCDebugHandler::Get()->GetProperty(ENABLE_POMS_DURING_DOZE, &value);
+    enable_poms_during_doze_ = (value == 1);
+    if (enable_poms_during_doze_) {
+      DLOGI("Enable POMS during Doze mode %" PRIu64 , id_);
+    }
   }
+
+  value = 0;
+  DebugHandler::Get()->GetProperty(DISABLE_DYNAMIC_FPS, &value);
+  disable_dyn_fps_ = (value == 1);
+  DLOGI("disable_dyn_fps_: %d", disable_dyn_fps_);
 
   uint32_t config_index = 0;
   GetActiveDisplayConfig(&config_index);
@@ -237,6 +249,11 @@ int HWCDisplayBuiltIn::Init() {
 
   DLOGI("active_refresh_rate: %d", active_refresh_rate_);
 
+  value = 0;
+  HWCDebugHandler::Get()->GetProperty(ENHANCE_IDLE_TIME, &value);
+  enhance_idle_time_ = (value == 1);
+  DLOGI("enhance_idle_time: %d", enhance_idle_time_);
+
   return status;
 }
 
@@ -245,13 +262,32 @@ void HWCDisplayBuiltIn::Dump(std::ostringstream *os) {
   *os << histogram.Dump();
 }
 
+void HWCDisplayBuiltIn::ValidateScalingForDozeMode() {
+  if (current_power_mode_ == HWC2::PowerMode::Doze) {
+    bool scaling_present = false;
+    for (auto &hwc_layer : layer_set_) {
+      if (hwc_layer->IsScalingPresent()) {
+        scaling_present = true;
+        break;
+      }
+    }
+    if (scaling_present) {
+      scaling_in_doze_ = true;
+    } else {
+      scaling_in_doze_ = false;
+    }
+  } else {
+    scaling_in_doze_ = false;
+  }
+}
+
 HWC2::Error HWCDisplayBuiltIn::Validate(uint32_t *out_num_types, uint32_t *out_num_requests) {
   auto status = HWC2::Error::None;
   DisplayError error = kErrorNone;
 
   DTRACE_SCOPED();
 
-  if (display_paused_ || (!is_primary_ && active_secure_sessions_[kSecureDisplay])) {
+  if (display_paused_) {
     MarkLayersForGPUBypass();
     return status;
   }
@@ -263,6 +299,9 @@ HWC2::Error HWCDisplayBuiltIn::Validate(uint32_t *out_num_types, uint32_t *out_n
 
   // Fill in the remaining blanks in the layers and add them to the SDM layerstack
   BuildLayerStack();
+
+  // Check for scaling layers during Doze mode
+  ValidateScalingForDozeMode();
 
   // Add stitch layer to layer stack.
   AppendStitchLayer();
@@ -297,14 +336,16 @@ HWC2::Error HWCDisplayBuiltIn::Validate(uint32_t *out_num_types, uint32_t *out_n
   }
 
   uint32_t refresh_rate = GetOptimalRefreshRate(one_updating_layer);
-  error = display_intf_->SetRefreshRate(refresh_rate, force_refresh_rate_);
+  bool idle_screen = GetUpdatingAppLayersCount() == 0;
+  error = display_intf_->SetRefreshRate(refresh_rate, force_refresh_rate_, idle_screen);
 
   // Get the refresh rate set.
   display_intf_->GetRefreshRate(&refresh_rate);
   bool vsync_source = (callbacks_->GetVsyncSource() == id_);
 
   if (error == kErrorNone) {
-    if (vsync_source && (current_refresh_rate_ < refresh_rate)) {
+    if (vsync_source && ((current_refresh_rate_ < refresh_rate) ||
+                         (enhance_idle_time_ && (current_refresh_rate_ != refresh_rate)))) {
       DTRACE_BEGIN("HWC2::Vsync::Enable");
       // Display is ramping up from idle.
       // Client realizes need for resync upon change in config.
@@ -367,29 +408,36 @@ HWC2::Error HWCDisplayBuiltIn::CommitStitchLayers() {
     return HWC2::Error::None;
   }
 
+  LayerStitchContext ctx = {};
+  Layer *stitch_layer = stitch_target_->GetSDMLayer();
+  LayerBuffer &output_buffer = stitch_layer->input_buffer;
   for (auto &layer : layer_stack_.layers) {
     LayerComposition &composition = layer->composition;
     if (composition != kCompositionStitch) {
       continue;
     }
 
-    LayerStitchContext ctx = {};
+    StitchParams params = {};
     // Stitch target doesn't have an input fence.
     // Render all layers at specified destination.
     LayerBuffer &input_buffer = layer->input_buffer;
-    ctx.src_hnd = reinterpret_cast<const private_handle_t *>(input_buffer.buffer_id);
-    Layer *stitch_layer = stitch_target_->GetSDMLayer();
-    LayerBuffer &output_buffer = stitch_layer->input_buffer;
-    ctx.dst_hnd = reinterpret_cast<const private_handle_t *>(output_buffer.buffer_id);
-    SetRect(layer->stitch_info.dst_rect, &ctx.dst_rect);
-    SetRect(layer->stitch_info.slice_rect, &ctx.scissor_rect);
-    ctx.src_acquire_fence = input_buffer.acquire_fence;
+    params.src_hnd = reinterpret_cast<const private_handle_t *>(input_buffer.buffer_id);
+    params.dst_hnd = reinterpret_cast<const private_handle_t *>(output_buffer.buffer_id);
+    SetRect(layer->stitch_info.dst_rect, &params.dst_rect);
+    SetRect(layer->stitch_info.slice_rect, &params.scissor_rect);
+    params.src_acquire_fence = input_buffer.acquire_fence;
 
-    layer_stitch_task_.PerformTask(LayerStitchTaskCode::kCodeStitch, &ctx);
-
-    // Merge with current fence.
-    output_buffer.acquire_fence = Fence::Merge(output_buffer.acquire_fence, ctx.release_fence);
+    ctx.stitch_params.push_back(params);
   }
+
+  if (!ctx.stitch_params.size()) {
+    // No layers marked for stitch.
+    return HWC2::Error::None;
+  }
+
+  layer_stitch_task_.PerformTask(LayerStitchTaskCode::kCodeStitch, &ctx);
+  // Set release fence.
+  output_buffer.acquire_fence = ctx.release_fence;
 
   return HWC2::Error::None;
 }
@@ -509,9 +557,7 @@ HWC2::Error HWCDisplayBuiltIn::Present(shared_ptr<Fence> *out_retire_fence) {
 
   DTRACE_SCOPED();
 
-  if (!is_primary_ && active_secure_sessions_[kSecureDisplay]) {
-    return status;
-  } else if (display_paused_) {
+  if (display_paused_) {
     DisplayError error = display_intf_->Flush(&layer_stack_);
     validated_ = false;
     if (error != kErrorNone) {
@@ -540,6 +586,15 @@ HWC2::Error HWCDisplayBuiltIn::Present(shared_ptr<Fence> *out_retire_fence) {
       if (is_cmd_mode_ != command_mode) {
         SetPartialUpdate(fixed_info);
       }
+
+      // For video mode panel with dynamic fps, update the active mode index.
+      // This is needed to report the correct Vsync period when client queries
+      // using GetDisplayVsyncPeriod API.
+      if (!is_cmd_mode_ && !disable_dyn_fps_) {
+        hwc2_config_t active_config = hwc_config_map_.at(0);
+        GetActiveConfig(&active_config);
+        SetActiveConfigIndex(active_config);
+      }
     }
   }
 
@@ -564,6 +619,12 @@ HWC2::Error HWCDisplayBuiltIn::Present(shared_ptr<Fence> *out_retire_fence) {
   }
 
   pending_commit_ = false;
+
+  // In case of scaling layer in Doze, reset validate
+  if (scaling_in_doze_) {
+    validated_ = false;
+    display_intf_->ClearLUTs();
+  }
   return status;
 }
 
@@ -900,13 +961,16 @@ void HWCDisplayBuiltIn::ToggleCPUHint(bool set) {
 }
 
 int HWCDisplayBuiltIn::HandleSecureSession(const std::bitset<kSecureMax> &secure_sessions,
-                                           bool *power_on_pending) {
+                                           bool *power_on_pending, bool is_active_secure_display) {
   if (!power_on_pending) {
     return -EINVAL;
   }
 
-  if (!is_primary_) {
-    return HWCDisplay::HandleSecureSession(secure_sessions, power_on_pending);
+  if (!is_active_secure_display) {
+    // Do handling as done on non-primary displays.
+    DLOGI("Default handling for display %" PRIu64 " %d-%d", id_, sdm_id_, type_);
+    return HWCDisplay::HandleSecureSession(secure_sessions, power_on_pending,
+                                           is_active_secure_display);
   }
 
   if (current_power_mode_ != HWC2::PowerMode::On) {
@@ -922,9 +986,9 @@ int HWCDisplayBuiltIn::HandleSecureSession(const std::bitset<kSecureMax> &secure
       return err;
     }
 
-    DLOGI("SecureDisplay state changed from %d to %d for display %" PRIu64 "-%d",
+    DLOGI("SecureDisplay state changed from %d to %d for display %" PRIu64 " %d-%d",
           active_secure_sessions_.test(kSecureDisplay), secure_sessions.test(kSecureDisplay),
-          id_, type_);
+          id_, sdm_id_, type_);
   }
   active_secure_sessions_ = secure_sessions;
   *power_on_pending = false;
@@ -1367,6 +1431,12 @@ bool HWCDisplayBuiltIn::IsSmartPanelConfig(uint32_t config_id) {
 }
 
 bool HWCDisplayBuiltIn::HasSmartPanelConfig(void) {
+  if (!enable_poms_during_doze_) {
+    uint32_t config = 0;
+    GetActiveDisplayConfig(&config);
+    return IsSmartPanelConfig(config);
+  }
+
   for (auto &config : variable_config_map_) {
     if (config.second.smart_panel) {
       return true;
@@ -1396,9 +1466,7 @@ void HWCDisplayBuiltIn::OnTask(const LayerStitchTaskCode &task_code,
     case LayerStitchTaskCode::kCodeStitch: {
         DTRACE_SCOPED();
         LayerStitchContext* ctx = reinterpret_cast<LayerStitchContext*>(task_context);
-        gl_layer_stitch_->Blit(ctx->src_hnd, ctx->dst_hnd, ctx->src_rect, ctx->dst_rect,
-                               ctx->scissor_rect, ctx->src_acquire_fence,
-                               ctx->dst_acquire_fence, &(ctx->release_fence));
+        gl_layer_stitch_->Blit(ctx->stitch_params, &(ctx->release_fence));
       }
       break;
     case LayerStitchTaskCode::kCodeDestroyInstance: {
@@ -1537,6 +1605,21 @@ bool HWCDisplayBuiltIn::HasReadBackBufferSupport() {
   display_intf_->GetConfig(&fixed_info);
 
   return fixed_info.readback_supported;
+}
+
+uint32_t HWCDisplayBuiltIn::GetUpdatingAppLayersCount() {
+  uint32_t updating_count = 0;
+
+  for (auto layer:layer_stack_.layers) {
+    if (layer->composition == kCompositionGPUTarget) {
+      break;
+    }
+    if (layer->flags.updating) {
+      updating_count++;
+    }
+  }
+
+  return updating_count;
 }
 
 HWC2::Error HWCDisplayBuiltIn::ApplyHbmLocked() {
