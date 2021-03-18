@@ -156,7 +156,8 @@ DisplayError DisplayPluggable::GetRefreshRateRange(uint32_t *min_refresh_rate,
   return error;
 }
 
-DisplayError DisplayPluggable::SetRefreshRate(uint32_t refresh_rate, bool final_rate) {
+DisplayError DisplayPluggable::SetRefreshRate(uint32_t refresh_rate, bool final_rate,
+                                              bool idle_screen) {
   lock_guard<recursive_mutex> obj(recursive_mutex_);
 
   if (!active_) {
@@ -358,7 +359,7 @@ static PrimariesTransfer GetBlendSpaceFromAttributes(const std::string &color_ga
 DisplayError DisplayPluggable::SetColorMode(const std::string &color_mode) {
   auto current_color_attr_ = color_mode_attr_map_.find(color_mode);
   if (current_color_attr_ == color_mode_attr_map_.end()) {
-    DLOGE("Failed to get the color mode = %s", color_mode.c_str());
+    DLOGW("Failed to get the color mode = %s", color_mode.c_str());
     return kErrorNone;
   }
   AttrVal attr = current_color_attr_->second;
@@ -378,12 +379,12 @@ DisplayError DisplayPluggable::SetColorMode(const std::string &color_mode) {
   PrimariesTransfer blend_space = GetBlendSpaceFromAttributes(color_gamut, transfer);
   error = comp_manager_->SetBlendSpace(display_comp_ctx_, blend_space);
   if (error != kErrorNone) {
-    DLOGE("Failed Set blend space, error = %d display_type_ = %d", error, display_type_);
+    DLOGW("Failed Set blend space, error = %d display_type_ = %d", error, display_type_);
   }
 
   error = hw_intf_->SetBlendSpace(blend_space);
   if (error != kErrorNone) {
-    DLOGE("Failed to pass blend space, error = %d display_type_ = %d", error, display_type_);
+    DLOGW("Failed to pass blend space, error = %d display_type_ = %d", error, display_type_);
   }
 
   current_color_mode_ = color_mode;

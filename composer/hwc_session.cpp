@@ -63,6 +63,7 @@ bool HWCSession::pending_power_mode_[HWCCallbacks::kNumDisplays];
 Locker HWCSession::power_state_[HWCCallbacks::kNumDisplays];
 Locker HWCSession::hdr_locker_[HWCCallbacks::kNumDisplays];
 Locker HWCSession::display_config_locker_;
+Locker HWCSession::system_locker_;
 static const int kSolidFillDelay = 100 * 1000;
 int HWCSession::null_display_mode_ = 0;
 static const uint32_t kBrightnessScaleMax = 100;
@@ -746,6 +747,7 @@ int32_t HWCSession::PresentDisplay(hwc2_display_t display, shared_ptr<Fence> *ou
   auto status = HWC2::Error::BadDisplay;
   DTRACE_SCOPED();
 
+  SCOPE_LOCK(system_locker_);
   if (display >= HWCCallbacks::kNumDisplays) {
     DLOGW("Invalid Display : display = %" PRIu64, display);
     return HWC2_ERROR_BAD_DISPLAY;
@@ -801,7 +803,9 @@ int32_t HWCSession::PresentDisplay(hwc2_display_t display, shared_ptr<Fence> *ou
   HandlePendingPowerMode(display, *out_retire_fence);
   HandlePendingHotplug(display, *out_retire_fence);
   HandlePendingRefresh();
-  cwb_.PresentDisplayDone(display);
+  if (status != HWC2::Error::NotValidated) {
+    cwb_.PresentDisplayDone(display);
+  }
   display_ready_.set(UINT32(display));
   {
     std::unique_lock<std::mutex> caller_lock(hotplug_mutex_);
@@ -1062,12 +1066,25 @@ int32_t HWCSession::SetPowerMode(hwc2_display_t display, int32_t int_mode) {
     return HWC2_ERROR_BAD_PARAMETER;
   }
 
+  auto mode = static_cast<HWC2::PowerMode>(int_mode);
+
+  // When secure session going on primary, if power request comes on second built-in, cache it and
+  // process once secure session ends.
+  // Allow power off transition during secure session.
+  bool is_builtin = (hwc_display_[display]->GetDisplayClass() == DISPLAY_CLASS_BUILTIN);
+  bool is_power_off = (hwc_display_[display]->GetCurrentPowerMode() == HWC2::PowerMode::Off);
+  if (secure_session_active_ && is_builtin && is_power_off) {
+    if (GetActiveBuiltinDisplay() != HWCCallbacks::kNumDisplays) {
+      DLOGI("Secure session in progress, defer power state change");
+      hwc_display_[display]->SetPendingPowerMode(mode);
+      return HWC2_ERROR_NONE;
+    }
+  }
+
   if (pending_power_mode_[display]) {
     DLOGW("Set power mode is not allowed during secure display session");
     return HWC2_ERROR_UNSUPPORTED;
   }
-
-  auto mode = static_cast<HWC2::PowerMode>(int_mode);
 
   //  all displays support on/off. Check for doze modes
   int support = 0;
@@ -1130,20 +1147,20 @@ int32_t HWCSession::GetDozeSupport(hwc2_display_t display, int32_t *out_support)
   }
 
   if (display >= HWCCallbacks::kNumDisplays || (hwc_display_[display] == nullptr)) {
-    DLOGE("Invalid Display %d Handle %s ", UINT32(display), hwc_display_[display] ?
-          "Valid" : "NULL");
+    // display may come as -1  from VTS test case
+    DLOGE("Invalid Display %d ", UINT32(display));
     return HWC2_ERROR_BAD_DISPLAY;
   }
 
   *out_support = 0;
 
-  if (display != qdutils::DISPLAY_PRIMARY) {
-    return HWC2_ERROR_NONE;
-  }
-
   SCOPE_LOCK(locker_[display]);
   if (!hwc_display_[display]) {
     DLOGE("Display %d is not created yet.", INT32(display));
+    return HWC2_ERROR_BAD_DISPLAY;
+  }
+
+  if (hwc_display_[display]->GetDisplayClass() != DISPLAY_CLASS_BUILTIN) {
     return HWC2_ERROR_NONE;
   }
 
@@ -2914,8 +2931,9 @@ void HWCSession::DestroyPluggableDisplay(DisplayMapInfo *map_info) {
   DLOGI("Notify hotplug display disconnected: client id = %d", UINT32(client_id));
   callbacks_.Hotplug(client_id, HWC2::Connection::Disconnected);
 
+  SCOPE_LOCK(system_locker_);
   {
-    SCOPE_LOCK(locker_[client_id]);
+    SEQUENCE_WAIT_SCOPE_LOCK(locker_[client_id]);
     auto &hwc_display = hwc_display_[client_id];
     if (!hwc_display) {
       return;
@@ -3112,12 +3130,24 @@ void HWCSession::HandleSecureSession() {
 
   // If it is called during primary prepare/commit, we need to pause any ongoing commit on
   // external/virtual display.
+  bool found_active_secure_display = false;
   for (hwc2_display_t display = HWC_DISPLAY_PRIMARY;
-    display < HWCCallbacks::kNumDisplays; display++) {
+       display < HWCCallbacks::kNumRealDisplays; display++) {
     Locker::ScopeLock lock_d(locker_[display]);
-    if (hwc_display_[display]) {
-      hwc_display_[display]->HandleSecureSession(secure_sessions, &pending_power_mode_[display]);
+    HWCDisplay *hwc_display = hwc_display_[display];
+    if (!hwc_display || hwc_display->GetDisplayClass() != DISPLAY_CLASS_BUILTIN) {
+      continue;
     }
+
+    bool is_active_secure_display = false;
+    // The first On/Doze/DozeSuspend built-in display is taken as the secure display.
+    if (!found_active_secure_display &&
+        hwc_display->GetCurrentPowerMode() != HWC2::PowerMode::Off) {
+      is_active_secure_display = true;
+      found_active_secure_display = true;
+    }
+    hwc_display->HandleSecureSession(secure_sessions, &pending_power_mode_[display],
+                                     is_active_secure_display);
   }
 }
 
@@ -3230,12 +3260,16 @@ void HWCSession::HandlePendingHotplug(hwc2_display_t disp_id,
 
 int32_t HWCSession::GetReadbackBufferAttributes(hwc2_display_t display, int32_t *format,
                                                 int32_t *dataspace) {
+  if (display >= HWCCallbacks::kNumDisplays) {
+    return HWC2_ERROR_BAD_DISPLAY;
+  }
+
   if (!format || !dataspace) {
     return HWC2_ERROR_BAD_PARAMETER;
   }
 
   if (display != HWC_DISPLAY_PRIMARY) {
-    return HWC2_ERROR_BAD_DISPLAY;
+    return HWC2_ERROR_UNSUPPORTED;
   }
 
   HWCDisplay *hwc_display = hwc_display_[display];
@@ -3253,12 +3287,17 @@ int32_t HWCSession::GetReadbackBufferAttributes(hwc2_display_t display, int32_t 
 
 int32_t HWCSession::SetReadbackBuffer(hwc2_display_t display, const native_handle_t *buffer,
                                       const shared_ptr<Fence> &acquire_fence) {
+
+  if (display >= HWCCallbacks::kNumDisplays) {
+    return HWC2_ERROR_BAD_DISPLAY;
+  }
+
   if (!buffer) {
     return HWC2_ERROR_BAD_PARAMETER;
   }
 
   if (display != HWC_DISPLAY_PRIMARY) {
-    return HWC2_ERROR_BAD_DISPLAY;
+    return HWC2_ERROR_UNSUPPORTED;
   }
 
   int external_dpy_index = GetDisplayIndex(qdutils::DISPLAY_EXTERNAL);
@@ -3274,12 +3313,16 @@ int32_t HWCSession::SetReadbackBuffer(hwc2_display_t display, const native_handl
 
 int32_t HWCSession::GetReadbackBufferFence(hwc2_display_t display,
                                            shared_ptr<Fence> *release_fence) {
+  if (display >= HWCCallbacks::kNumDisplays) {
+    return HWC2_ERROR_BAD_DISPLAY;
+  }
+
   if (!release_fence) {
     return HWC2_ERROR_BAD_PARAMETER;
   }
 
   if (display != HWC_DISPLAY_PRIMARY) {
-    return HWC2_ERROR_BAD_DISPLAY;
+    return HWC2_ERROR_UNSUPPORTED;
   }
 
   return CallDisplayFunction(display, &HWCDisplay::GetReadbackBufferFence, release_fence);
@@ -3504,14 +3547,32 @@ void HWCSession::NotifyClientStatus(bool connected) {
     }
     SCOPE_LOCK(locker_[i]);
     hwc_display_[i]->NotifyClientStatus(connected);
+    hwc_display_[i]->SetVsyncEnabled(HWC2::Vsync::Disable);
   }
+  callbacks_.UpdateVsyncSource(HWCCallbacks::kNumDisplays);
 }
 
 void HWCSession::WaitForResources(bool wait_for_resources, hwc2_display_t active_builtin_id,
                                   hwc2_display_t display_id) {
-  {
-    SEQUENCE_WAIT_SCOPE_LOCK(locker_[active_builtin_id]);
-    hwc_display_[active_builtin_id]->ResetValidation();
+  std::vector<DisplayMapInfo> map_info = {map_info_primary_};
+  std::copy(map_info_builtin_.begin(), map_info_builtin_.end(), std::back_inserter(map_info));
+
+  for (auto &info : map_info) {
+    hwc2_display_t target_display = info.client_id;
+    {
+      SCOPE_LOCK(power_state_[target_display]);
+      if (power_state_transition_[target_display]) {
+        // Route all interactions with client to dummy display.
+        target_display = map_hwc_display_.find(target_display)->second;
+      }
+    }
+    {
+      SEQUENCE_WAIT_SCOPE_LOCK(locker_[target_display]);
+      auto &hwc_display = hwc_display_[target_display];
+      if (hwc_display && hwc_display->GetCurrentPowerMode() != HWC2::PowerMode::Off) {
+        hwc_display->ResetValidation();
+      }
+    }
   }
 
   if (wait_for_resources) {
