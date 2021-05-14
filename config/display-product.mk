@@ -84,7 +84,7 @@ PRODUCT_PROPERTY_OVERRIDES += \
 endif
 
 # Enable power async mode
-PRODUCT_PROPERTY_OVERRIDES +=  vendor.display.enable_async_powermode=1
+#PRODUCT_PROPERTY_OVERRIDES +=  vendor.display.enable_async_powermode=1
 
 QMAA_ENABLED_HAL_MODULES += display
 ifeq ($(TARGET_USES_QMAA),true)
