@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2014-2020, The Linux Foundation. All rights reserved.
+* Copyright (c) 2014-2021, The Linux Foundation. All rights reserved.
 *
 * Redistribution and use in source and binary forms, with or without
 * modification, are permitted provided that the following conditions are
@@ -254,6 +254,10 @@ int HWCDisplayBuiltIn::Init() {
   enhance_idle_time_ = (value == 1);
   DLOGI("enhance_idle_time: %d", enhance_idle_time_);
 
+  HWCDebugHandler::Get()->GetProperty(PERF_HINT_WINDOW_PROP, &perf_hint_window_);
+  HWCDebugHandler::Get()->GetProperty(ENABLE_PERF_HINT_LARGE_COMP_CYCLE,
+                                      &perf_hint_large_comp_cycle_);
+
   return status;
 }
 
@@ -262,23 +266,20 @@ void HWCDisplayBuiltIn::Dump(std::ostringstream *os) {
   *os << histogram.Dump();
 }
 
-void HWCDisplayBuiltIn::ValidateScalingForDozeMode() {
-  if (current_power_mode_ == HWC2::PowerMode::Doze) {
-    bool scaling_present = false;
-    for (auto &hwc_layer : layer_set_) {
-      if (hwc_layer->IsScalingPresent()) {
-        scaling_present = true;
-        break;
-      }
-    }
-    if (scaling_present) {
-      scaling_in_doze_ = true;
-    } else {
-      scaling_in_doze_ = false;
-    }
-  } else {
-    scaling_in_doze_ = false;
+void HWCDisplayBuiltIn::ValidateUiScaling() {
+  if (is_primary_ || !is_cmd_mode_) {
+    force_reset_validate_ = false;
+    return;
   }
+
+  for (auto &hwc_layer : layer_set_) {
+    Layer *layer = hwc_layer->GetSDMLayer();
+    if (hwc_layer->IsScalingPresent() && !layer->input_buffer.flags.video) {
+      force_reset_validate_ = true;
+      return;
+    }
+  }
+  force_reset_validate_ = false;
 }
 
 HWC2::Error HWCDisplayBuiltIn::Validate(uint32_t *out_num_types, uint32_t *out_num_requests) {
@@ -301,7 +302,7 @@ HWC2::Error HWCDisplayBuiltIn::Validate(uint32_t *out_num_types, uint32_t *out_n
   BuildLayerStack();
 
   // Check for scaling layers during Doze mode
-  ValidateScalingForDozeMode();
+  ValidateUiScaling();
 
   // Add stitch layer to layer stack.
   AppendStitchLayer();
@@ -366,6 +367,7 @@ HWC2::Error HWCDisplayBuiltIn::Validate(uint32_t *out_num_types, uint32_t *out_n
   }
 
   status = PrepareLayerStack(out_num_types, out_num_requests);
+  SetCpuPerfHintLargeCompCycle();
   pending_commit_ = true;
   return status;
 }
@@ -620,8 +622,8 @@ HWC2::Error HWCDisplayBuiltIn::Present(shared_ptr<Fence> *out_retire_fence) {
 
   pending_commit_ = false;
 
-  // In case of scaling layer in Doze, reset validate
-  if (scaling_in_doze_) {
+  // In case of scaling UI layer for command mode, reset validate
+  if (force_reset_validate_) {
     validated_ = false;
     display_intf_->ClearLUTs();
   }
@@ -949,7 +951,7 @@ void HWCDisplayBuiltIn::SetQDCMSolidFillInfo(bool enable, const LayerSolidFill &
 }
 
 void HWCDisplayBuiltIn::ToggleCPUHint(bool set) {
-  if (!cpu_hint_) {
+  if (!cpu_hint_ || !perf_hint_window_) {
     return;
   }
 
@@ -1620,6 +1622,29 @@ uint32_t HWCDisplayBuiltIn::GetUpdatingAppLayersCount() {
   }
 
   return updating_count;
+}
+
+bool HWCDisplayBuiltIn::IsDisplayIdle() {
+  // Notify only if this display is source of vsync.
+  bool vsync_source = (callbacks_->GetVsyncSource() == id_);
+  return vsync_source && display_idle_;
+}
+
+void HWCDisplayBuiltIn::SetCpuPerfHintLargeCompCycle() {
+  if (!cpu_hint_ || !perf_hint_large_comp_cycle_) {
+    DLOGV_IF(kTagResources, "cpu_hint_ not initialized or property not set");
+    return;
+  }
+
+  for (auto hwc_layer : layer_set_) {
+    Layer *layer = hwc_layer->GetSDMLayer();
+    if (layer->composition == kCompositionGPU) {
+      DLOGV_IF(kTagResources, "Set perf hint for large comp cycle");
+      int hwc_tid = gettid();
+      cpu_hint_->ReqHintsOffload(kPerfHintLargeCompCycle, hwc_tid);
+      break;
+    }
+  }
 }
 
 HWC2::Error HWCDisplayBuiltIn::ApplyHbmLocked() {
