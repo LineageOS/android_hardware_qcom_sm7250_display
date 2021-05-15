@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2020, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2021, The Linux Foundation. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -148,6 +148,7 @@ class HWCDisplayBuiltIn : public HWCDisplay, public SyncTask<LayerStitchTaskCode
   void Dump(std::ostringstream *os) override;
   virtual HWC2::Error SetPowerMode(HWC2::PowerMode mode, bool teardown);
   virtual bool HasReadBackBufferSupport();
+  virtual bool IsDisplayIdle();
 
   virtual bool IsHbmSupported() override;
   virtual HWC2::Error SetHbm(HbmState state, HbmClient client) override;
@@ -178,11 +179,12 @@ class HWCDisplayBuiltIn : public HWCDisplay, public SyncTask<LayerStitchTaskCode
   bool AllocateStitchBuffer();
   void CacheAvrStatus();
   void PostCommitStitchLayers();
+  void SetCpuPerfHintLargeCompCycle();
   int GetBwCode(const DisplayConfigVariableInfo &attr);
   void SetBwLimitHint(bool enable);
   void SetPartialUpdate(DisplayConfigFixedInfo fixed_info);
   uint32_t GetUpdatingAppLayersCount();
-  void ValidateScalingForDozeMode();
+  void ValidateUiScaling();
   HWC2::Error ApplyHbmLocked() REQUIRES(hbm_mutex);
 
   // SyncTask methods.
@@ -192,7 +194,7 @@ class HWCDisplayBuiltIn : public HWCDisplay, public SyncTask<LayerStitchTaskCode
   constexpr static int kBwLow = 2;
   constexpr static int kBwMedium = 3;
   constexpr static int kBwHigh = 4;
-
+  const int kPerfHintLargeCompCycle = 0x00001097;
   BufferAllocator *buffer_allocator_ = nullptr;
   CPUHint *cpu_hint_ = nullptr;
   CWBClient cwb_client_ = kCWBClientNone;
@@ -232,13 +234,15 @@ class HWCDisplayBuiltIn : public HWCDisplay, public SyncTask<LayerStitchTaskCode
   std::mutex sampling_mutex;
   bool api_sampling_vote = false;
   bool vndservice_sampling_vote = false;
+  int perf_hint_window_ = 0;
+  int perf_hint_large_comp_cycle_ = 0;
   int curr_refresh_rate_ = 0;
   bool is_smart_panel_ = false;
   const char *kDisplayBwName = "display_bw";
   bool enable_bw_limits_ = false;
   bool disable_dyn_fps_ = false;
   bool enhance_idle_time_ = false;
-  bool scaling_in_doze_ = false;
+  bool force_reset_validate_ = false;
 
   // Members for HBM feature
   static constexpr const char kHighBrightnessModeNode[] =

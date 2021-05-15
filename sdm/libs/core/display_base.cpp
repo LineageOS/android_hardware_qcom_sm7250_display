@@ -501,11 +501,8 @@ DisplayError DisplayBase::GetConfig(DisplayConfigFixedInfo *fixed_info) {
     hdr_supported = (hdr_supported && hw_panel_info_.hdr_enabled);
   }
 
-  // Built-in displays not support HDR10+ even the target supports HDR to comply with spec. For non-builtins, check
-  // panel capability.
-  if (kBuiltIn == display_type_) {
-    hdr_plus_supported = false;
-  } else if (hdr_supported && hw_panel_info_.hdr_plus_enabled) {
+  // For non-builtin displays, check panel capability for HDR10+
+  if (hdr_supported && hw_panel_info_.hdr_plus_enabled) {
     hdr_plus_supported = true;
   }
 
@@ -749,6 +746,7 @@ std::string DisplayBase::Dump() {
   os << " h_total: " << display_attributes_.h_total;
   os << " clk: " << display_attributes_.clock_khz;
   os << " Topology: " << display_attributes_.topology;
+  os << " Qsync mode: " << active_qsync_mode_;
   os << std::noboolalpha;
 
   os << "\nCurrent Color Mode: " << current_color_mode_.c_str();
