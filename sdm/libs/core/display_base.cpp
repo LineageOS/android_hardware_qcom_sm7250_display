@@ -500,10 +500,10 @@ DisplayError DisplayBase::GetConfig(DisplayConfigFixedInfo *fixed_info) {
     hdr_supported = (hdr_supported && hw_panel_info_.hdr_enabled);
   }
 
-  // Built-in displays always support HDR10+ when the target supports HDR. For non-builtins, check
+  // Built-in displays not support HDR10+ even the target supports HDR to comply with spec. For non-builtins, check
   // panel capability.
   if (kBuiltIn == display_type_) {
-    hdr_plus_supported = hdr_supported;
+    hdr_plus_supported = false;
   } else if (hdr_supported && hw_panel_info_.hdr_plus_enabled) {
     hdr_plus_supported = true;
   }
