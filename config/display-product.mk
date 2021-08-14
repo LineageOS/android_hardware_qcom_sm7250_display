@@ -20,7 +20,6 @@ PRODUCT_PACKAGES += \
     modetest
 
 PRODUCT_PROPERTY_OVERRIDES += \
-    persist.demo.hdmirotationlock=false \
     persist.sys.sf.color_saturation=1.0 \
     persist.sys.sf.color_mode=9 \
     debug.sf.hw=0 \
@@ -33,7 +32,8 @@ PRODUCT_PROPERTY_OVERRIDES += \
     vendor.display.comp_mask=0 \
     vendor.display.enable_posted_start_dyn=1 \
     vendor.display.enable_optimize_refresh=1 \
-    vendor.display.use_smooth_motion=1
+    vendor.display.use_smooth_motion=1 \
+    vendor.display.enable_camera_smooth=1
 
 # Enable offline rotator for Bengal.
 ifneq ($(TARGET_BOARD_PLATFORM),bengal)
@@ -45,16 +45,13 @@ PRODUCT_PROPERTY_OVERRIDES += \
     vendor.display.normal_noc_efficiency_factor=0.85 \
     vendor.display.camera_noc_efficiency_factor=0.70 \
     vendor.display.disable_layer_stitch=0 \
-    vendor.display.secure_preview_buffer_format=420_sp
+    vendor.display.secure_preview_buffer_format=420_sp \
+    vendor.gralloc.secure_preview_buffer_format=420_sp
 endif
 
 ifeq ($(TARGET_BOARD_PLATFORM),kona)
 PRODUCT_PROPERTY_OVERRIDES += \
     debug.sf.enable_gl_backpressure=1
-endif
-
-ifneq ($(PLATFORM_VERSION), 10)
-    PRODUCT_PROPERTY_OVERRIDES +=  vendor.display.enable_async_powermode=0
 endif
 
 #Set WCG properties
@@ -63,6 +60,7 @@ PRODUCT_DEFAULT_PROPERTY_OVERRIDES += ro.surface_flinger.has_HDR_display=true
 PRODUCT_DEFAULT_PROPERTY_OVERRIDES += ro.surface_flinger.use_color_management=true
 PRODUCT_DEFAULT_PROPERTY_OVERRIDES += ro.surface_flinger.wcg_composition_dataspace=143261696
 PRODUCT_DEFAULT_PROPERTY_OVERRIDES += ro.surface_flinger.protected_contents=true
+PRODUCT_DEFAULT_PROPERTY_OVERRIDES += ro.surface_flinger.force_hwc_copy_for_virtual_displays=true
 
 ifneq (,$(filter userdebug eng, $(TARGET_BUILD_VARIANT)))
 # Recovery is enabled, logging is enabled
@@ -73,6 +71,9 @@ else
 PRODUCT_PROPERTY_OVERRIDES += \
     vendor.display.disable_hw_recovery_dump=1
 endif
+
+# Enable power async mode
+#PRODUCT_PROPERTY_OVERRIDES +=  vendor.display.enable_async_powermode=1
 
 QMAA_ENABLED_HAL_MODULES += display
 ifeq ($(TARGET_USES_QMAA),true)

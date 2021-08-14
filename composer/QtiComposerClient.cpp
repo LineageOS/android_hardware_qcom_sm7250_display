@@ -1131,6 +1131,10 @@ Return<void> QtiComposerClient::setActiveConfigWithConstraints(
 }
 
 Return<composer_V2_4::Error> QtiComposerClient::setAutoLowLatencyMode(uint64_t display, bool on) {
+  if (mDisplayData.find(display) == mDisplayData.end()) {
+    return composer_V2_4::Error::BAD_DISPLAY;
+  }
+
   auto error = hwc_session_->SetAutoLowLatencyMode(display, on);
 
   return static_cast<composer_V2_4::Error>(error);
@@ -1139,6 +1143,10 @@ Return<composer_V2_4::Error> QtiComposerClient::setAutoLowLatencyMode(uint64_t d
 Return<void> QtiComposerClient::getSupportedContentTypes(uint64_t display,
                                                          getSupportedContentTypes_cb _hidl_cb) {
   hidl_vec<composer_V2_4::IComposerClient::ContentType> types;
+  if (mDisplayData.find(display) == mDisplayData.end()) {
+    _hidl_cb(composer_V2_4::Error::BAD_DISPLAY, types);
+    return Void();
+  }
   auto error = hwc_session_->GetSupportedContentTypes(display, &types);
   _hidl_cb(static_cast<composer_V2_4::Error>(error), types);
   return Void();
@@ -1146,6 +1154,12 @@ Return<void> QtiComposerClient::getSupportedContentTypes(uint64_t display,
 
 Return<composer_V2_4::Error> QtiComposerClient::setContentType(
     uint64_t display, composer_V2_4::IComposerClient::ContentType type) {
+  if (mDisplayData.find(display) == mDisplayData.end()) {
+    return composer_V2_4::Error::BAD_DISPLAY;
+  }
+  if (type == composer_V2_4::IComposerClient::ContentType::NONE) {
+    return composer_V2_4::Error::NONE;
+  }
   auto error = hwc_session_->SetContentType(display, type);
 
   return static_cast<composer_V2_4::Error>(error);
@@ -1894,7 +1908,7 @@ bool QtiComposerClient::CommandReader::parseSetLayerPerFrameMetadataBlobs(uint16
   for (const auto& m : metadata) {
     keys.push_back(static_cast<int32_t>(m.key));
     sizes_of_metablob_.push_back(m.blob.size());
-    for (uint8_t i = 0; i < m.blob.size(); i++) {
+    for (size_t i = 0; i < m.blob.size(); i++) {
       blob_of_data_.push_back(m.blob[i]);
     }
   }

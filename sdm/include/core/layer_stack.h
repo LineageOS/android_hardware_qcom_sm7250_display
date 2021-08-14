@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2014-2020, The Linux Foundation. All rights reserved.
+* Copyright (c) 2014-2021, The Linux Foundation. All rights reserved.
 *
 * Redistribution and use in source and binary forms, with or without modification, are permitted
 * provided that the following conditions are met:
@@ -176,6 +176,10 @@ struct LayerFlags {
 
       uint32_t is_game : 1;  //!< This flag shall be set by client to indicate that this layer
                              //!< is a game layer.
+
+      uint32_t sde_preferred : 1;  //! This flag shall be set by client to indicate that this layer
+                                   //! will be composed by display device, layer with this flag
+                                   //! will have highest priority. To be used by OEMs only.
     };
 
     uint32_t flags = 0;       //!< For initialization purpose only.
@@ -266,6 +270,8 @@ struct LayerStackFlags {
       uint32_t mask_present : 1;  //!< Set if layer stack has mask layers.
 
       uint32_t config_changed : 1;  //!< This flag indicates Display config must be validated.
+
+      uint32_t scaling_rgb_layer_present : 1; //!< This flag indicates scaling rgb layer presense
     };
 
     uint32_t flags = 0;               //!< For initialization purpose only.

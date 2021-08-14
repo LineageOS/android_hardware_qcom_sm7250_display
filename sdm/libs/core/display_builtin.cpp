@@ -57,6 +57,10 @@ DisplayBuiltIn::DisplayBuiltIn(int32_t display_id, DisplayEventHandler *event_ha
 DisplayBuiltIn::~DisplayBuiltIn() {
 }
 
+static uint64_t GetTimeInMs(struct timespec ts) {
+  return (ts.tv_sec * 1000 + (ts.tv_nsec + 500000) / 1000000);
+}
+
 DisplayError DisplayBuiltIn::Init() {
   lock_guard<recursive_mutex> obj(recursive_mutex_);
 
@@ -117,6 +121,21 @@ DisplayError DisplayBuiltIn::Init() {
   Debug::Get()->GetProperty(DEFER_FPS_FRAME_COUNT, &value);
   deferred_config_.frame_count = (value > 0) ? UINT32(value) : 0;
 
+  value = 0;
+  DebugHandler::Get()->GetProperty(DISABLE_DYNAMIC_FPS, &value);
+  disable_dyn_fps_ = (value == 1);
+
+  value = 0;
+  DebugHandler::Get()->GetProperty(ENHANCE_IDLE_TIME, &value);
+  enhance_idle_time_ = (value == 1);
+
+  value = 0;
+  DebugHandler::Get()->GetProperty(ENABLE_QSYNC_IDLE, &value);
+  enable_qsync_idle_ = hw_panel_info_.qsync_support && (value == 1);
+  if (enable_qsync_idle_) {
+    DLOGI("Enabling qsync on idling");
+  }
+
   return error;
 }
 
@@ -143,8 +162,7 @@ DisplayError DisplayBuiltIn::Prepare(LayerStack *layer_stack) {
     }
   } else {
     if (CanSkipDisplayPrepare(layer_stack)) {
-      hw_layers_.hw_avr_info.update = needs_avr_update_;
-      hw_layers_.hw_avr_info.mode = GetAvrMode(qsync_mode_);
+      UpdateQsyncMode();
       return kErrorNone;
     }
   }
@@ -152,8 +170,7 @@ DisplayError DisplayBuiltIn::Prepare(LayerStack *layer_stack) {
   // Clean hw layers for reuse.
   hw_layers_ = HWLayers();
 
-  hw_layers_.hw_avr_info.update = needs_avr_update_;
-  hw_layers_.hw_avr_info.mode = GetAvrMode(qsync_mode_);
+  UpdateQsyncMode();
 
   left_frame_roi_ = {};
   right_frame_roi_ = {};
@@ -169,6 +186,31 @@ DisplayError DisplayBuiltIn::Prepare(LayerStack *layer_stack) {
   }
 
   return error;
+}
+
+void DisplayBuiltIn::UpdateQsyncMode() {
+  if (!hw_panel_info_.qsync_support || (hw_panel_info_.mode == kModeCommand)) {
+    return;
+  }
+
+  QSyncMode mode = kQSyncModeNone;
+  if (handle_idle_timeout_ && enable_qsync_idle_) {
+    // Override to continuous mode upon idling.
+    mode = kQSyncModeContinuous;
+    DLOGV_IF(kTagDisplay, "Qsync entering continuous mode");
+  } else {
+    // Set Qsync mode requested by client.
+    mode = qsync_mode_;
+    DLOGV_IF(kTagDisplay, "Restoring client's qsync mode: %d", mode);
+  }
+
+  hw_layers_.hw_avr_info.update = (mode != active_qsync_mode_) || needs_avr_update_;
+  hw_layers_.hw_avr_info.mode = GetAvrMode(mode);
+
+  DLOGV_IF(kTagDisplay, "update: %d mode: %d", hw_layers_.hw_avr_info.update, mode);
+
+  // Store active mode.
+  active_qsync_mode_ = mode;
 }
 
 HWAVRModes DisplayBuiltIn::GetAvrMode(QSyncMode mode) {
@@ -291,9 +333,11 @@ DisplayError DisplayBuiltIn::Commit(LayerStack *layer_stack) {
     deferred_config_.Clear();
   }
 
+  clock_gettime(CLOCK_MONOTONIC, &idle_timer_start_);
   int idle_time_ms = hw_layers_.info.set_idle_time_ms;
   if (idle_time_ms >= 0) {
     hw_intf_->SetIdleTimeoutMs(UINT32(idle_time_ms));
+    idle_time_ms_ = idle_time_ms;
   }
 
   if (switch_to_cmd_) {
@@ -312,6 +356,18 @@ DisplayError DisplayBuiltIn::Commit(LayerStack *layer_stack) {
   }
   dpps_info_.Init(this, hw_panel_info_.panel_name);
 
+  HandleQsyncPostCommit(layer_stack);
+
+  first_cycle_ = false;
+
+  previous_retire_fence_ = layer_stack->retire_fence;
+
+  handle_idle_timeout_ = false;
+
+  return error;
+}
+
+void DisplayBuiltIn::HandleQsyncPostCommit(LayerStack *layer_stack) {
   if (qsync_mode_ == kQsyncModeOneShot) {
     // Reset qsync mode.
     SetQSyncMode(kQSyncModeNone);
@@ -323,11 +379,13 @@ DisplayError DisplayBuiltIn::Commit(LayerStack *layer_stack) {
     needs_avr_update_ = false;
   }
 
-  first_cycle_ = false;
+  SetVsyncStatus(true /*Re-enable vsync.*/);
 
-  previous_retire_fence_ = layer_stack->retire_fence;
-
-  return error;
+  bool notify_idle = enable_qsync_idle_ && (active_qsync_mode_ != kQSyncModeNone) &&
+                     handle_idle_timeout_;
+  if (notify_idle) {
+    event_handler_->HandleEvent(kPostIdleTimeout);
+  }
 }
 
 void DisplayBuiltIn::UpdateDisplayModeParams() {
@@ -521,10 +579,12 @@ DisplayError DisplayBuiltIn::TeardownConcurrentWriteback(void) {
   return hw_intf_->TeardownConcurrentWriteback();
 }
 
-DisplayError DisplayBuiltIn::SetRefreshRate(uint32_t refresh_rate, bool final_rate) {
+DisplayError DisplayBuiltIn::SetRefreshRate(uint32_t refresh_rate, bool final_rate,
+                                            bool idle_screen) {
   lock_guard<recursive_mutex> obj(recursive_mutex_);
 
-  if (!active_ || !hw_panel_info_.dynamic_fps || qsync_mode_ != kQSyncModeNone) {
+  if (!active_ || !hw_panel_info_.dynamic_fps || qsync_mode_ != kQSyncModeNone ||
+      disable_dyn_fps_) {
     return kErrorNotSupported;
   }
 
@@ -533,11 +593,11 @@ DisplayError DisplayBuiltIn::SetRefreshRate(uint32_t refresh_rate, bool final_ra
     return kErrorParameters;
   }
 
-  if (handle_idle_timeout_ && !final_rate) {
+  if (CanLowerFps(idle_screen) && !final_rate && !enable_qsync_idle_) {
     refresh_rate = hw_panel_info_.min_fps;
   }
 
-  if ((current_refresh_rate_ != refresh_rate) || handle_idle_timeout_) {
+  if (current_refresh_rate_ != refresh_rate) {
     DisplayError error = hw_intf_->SetRefreshRate(refresh_rate);
     if (error != kErrorNone) {
       // Attempt to update refresh rate can fail if rf interfenence is detected.
@@ -552,22 +612,67 @@ DisplayError DisplayBuiltIn::SetRefreshRate(uint32_t refresh_rate, bool final_ra
     }
   }
 
+  // Set safe mode upon success.
+  if (enhance_idle_time_ && handle_idle_timeout_ && (refresh_rate == hw_panel_info_.min_fps)) {
+    comp_manager_->ProcessIdleTimeout(display_comp_ctx_);
+  }
+
   // On success, set current refresh rate to new refresh rate
   current_refresh_rate_ = refresh_rate;
-  handle_idle_timeout_ = false;
   deferred_config_.MarkDirty();
 
   return ReconfigureDisplay();
 }
 
-DisplayError DisplayBuiltIn::VSync(int64_t timestamp) {
-  if (vsync_enable_ && !drop_hw_vsync_) {
-    DisplayEventVSync vsync;
-    vsync.timestamp = timestamp;
-    event_handler_->VSync(vsync);
+bool DisplayBuiltIn::CanLowerFps(bool idle_screen) {
+  if (!enhance_idle_time_) {
+    return handle_idle_timeout_;
   }
 
+  if (!handle_idle_timeout_ || !idle_screen) {
+    return false;
+  }
+
+  struct timespec now;
+  clock_gettime(CLOCK_MONOTONIC, &now);
+  uint64_t elapsed_time_ms = GetTimeInMs(now) - GetTimeInMs(idle_timer_start_);
+  bool can_lower = elapsed_time_ms >= UINT32(idle_time_ms_);
+  DLOGV_IF(kTagDisplay, "lower fps: %d", can_lower);
+
+  return can_lower;
+}
+
+DisplayError DisplayBuiltIn::VSync(int64_t timestamp) {
+  DTRACE_SCOPED();
+  bool qsync_enabled = enable_qsync_idle_ && (active_qsync_mode_ != kQSyncModeNone);
+  // Client isn't aware of underlying qsync mode.
+  // Disable vsync propagation as long as qsync is enabled.
+  bool propagate_vsync = vsync_enable_ && !drop_hw_vsync_ && !qsync_enabled;
+  if (!propagate_vsync) {
+    // Re enable when display updates.
+    SetVsyncStatus(false /*Disable vsync events.*/);
+    return kErrorNone;
+  }
+
+  DisplayEventVSync vsync;
+  vsync.timestamp = timestamp;
+  event_handler_->VSync(vsync);
+
   return kErrorNone;
+}
+
+void DisplayBuiltIn::SetVsyncStatus(bool enable) {
+  string trace_name = enable ? "enable" : "disable";
+  DTRACE_BEGIN(trace_name.c_str());
+  if (enable) {
+    // Enable if vsync is still enabled.
+    hw_events_intf_->SetEventState(HWEvent::VSYNC, vsync_enable_);
+    pending_vsync_enable_ = false;
+  } else {
+    hw_events_intf_->SetEventState(HWEvent::VSYNC, false);
+    pending_vsync_enable_ = true;
+  }
+  DTRACE_END();
 }
 
 void DisplayBuiltIn::IdleTimeout() {
@@ -577,8 +682,10 @@ void DisplayBuiltIn::IdleTimeout() {
     }
     handle_idle_timeout_ = true;
     event_handler_->Refresh();
-    lock_guard<recursive_mutex> obj(recursive_mutex_);
-    comp_manager_->ProcessIdleTimeout(display_comp_ctx_);
+    if (!enhance_idle_time_) {
+      lock_guard<recursive_mutex> obj(recursive_mutex_);
+      comp_manager_->ProcessIdleTimeout(display_comp_ctx_);
+    }
   }
 }
 
@@ -599,6 +706,11 @@ void DisplayBuiltIn::IdlePowerCollapse() {
     lock_guard<recursive_mutex> obj(recursive_mutex_);
     comp_manager_->ProcessIdlePowerCollapse(display_comp_ctx_);
   }
+}
+
+DisplayError DisplayBuiltIn::ClearLUTs() {
+  comp_manager_->ProcessIdlePowerCollapse(display_comp_ctx_);
+  return kErrorNone;
 }
 
 void DisplayBuiltIn::PanelDead() {
@@ -894,7 +1006,7 @@ DisplayError DisplayBuiltIn::HandleSecureEvent(SecureEvent secure_event, LayerSt
 }
 
 DisplayError DisplayBuiltIn::GetQSyncMode(QSyncMode *qsync_mode) {
-  *qsync_mode = qsync_mode_;
+  *qsync_mode = active_qsync_mode_;
   return kErrorNone;
 }
 
@@ -1162,10 +1274,11 @@ DisplayError DisplayBuiltIn::ReconfigureDisplay() {
 
   error = comp_manager_->ReconfigureDisplay(display_comp_ctx_, display_attributes, hw_panel_info,
                                             mixer_attributes, fb_config_,
-                                            &(default_qos_data_.clock_hz));
+                                            &(default_clock_hz_));
   if (error != kErrorNone) {
     return error;
   }
+  cached_qos_data_.clock_hz = default_clock_hz_;
 
   bool disble_pu = true;
   if (mixer_unchanged && panel_unchanged) {
@@ -1213,6 +1326,28 @@ void DisplayBuiltIn::GetFpsConfig(HWDisplayAttributes *display_attr, HWPanelInfo
   display_attr->fps = display_attributes_.fps;
   display_attr->vsync_period_ns = display_attributes_.vsync_period_ns;
   panel_info->transfer_time_us = hw_panel_info_.transfer_time_us;
+}
+
+DisplayError DisplayBuiltIn::GetConfig(DisplayConfigFixedInfo *fixed_info) {
+  lock_guard<recursive_mutex> obj(recursive_mutex_);
+  fixed_info->is_cmdmode = (hw_panel_info_.mode == kModeCommand);
+
+  HWResourceInfo hw_resource_info = HWResourceInfo();
+  hw_info_intf_->GetHWResourceInfo(&hw_resource_info);
+
+  fixed_info->hdr_supported = hw_resource_info.has_hdr;
+  // Built-in displays not support HDR10+ even the target supports HDR to comply with spec
+  fixed_info->hdr_plus_supported = false;
+  // Populate luminance values only if hdr will be supported on that display
+  fixed_info->max_luminance = fixed_info->hdr_supported ? hw_panel_info_.peak_luminance: 0;
+  fixed_info->average_luminance = fixed_info->hdr_supported ? hw_panel_info_.average_luminance : 0;
+  fixed_info->min_luminance = fixed_info->hdr_supported ?  hw_panel_info_.blackness_level: 0;
+  fixed_info->hdr_eotf = hw_panel_info_.hdr_eotf;
+  fixed_info->hdr_metadata_type_one = hw_panel_info_.hdr_metadata_type_one;
+  fixed_info->partial_update = hw_panel_info_.partial_update;
+  fixed_info->readback_supported = hw_resource_info.has_concurrent_writeback;
+
+  return kErrorNone;
 }
 
 }  // namespace sdm
