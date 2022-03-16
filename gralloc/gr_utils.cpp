@@ -1079,17 +1079,12 @@ void GetAlignedWidthAndHeight(const BufferInfo &info, unsigned int *alignedw,
   // Below should be only YUV family
   switch (format) {
     case HAL_PIXEL_FORMAT_YCrCb_420_SP:
-      /*
-       * Todo: relook this alignment again
-       * Change made to unblock the software EIS feature from camera
-       * Currently using same alignment as camera doing
-       */
-      aligned_w = INT(VENUS_Y_STRIDE(COLOR_FMT_NV21, width));
-      aligned_h = INT(VENUS_Y_SCANLINES(COLOR_FMT_NV21, height));
-      break;
     case HAL_PIXEL_FORMAT_YCbCr_420_SP:
-      aligned_w = INT(VENUS_Y_STRIDE(COLOR_FMT_NV12, width));
-      aligned_h = INT(VENUS_Y_SCANLINES(COLOR_FMT_NV12, height));
+      if (AdrenoMemInfo::GetInstance() == nullptr) {
+        return;
+      }
+      alignment = AdrenoMemInfo::GetInstance()->GetGpuPixelAlignment();
+      aligned_w = ALIGN(width, alignment);
       break;
     case HAL_PIXEL_FORMAT_YCrCb_420_SP_ADRENO:
       aligned_w = ALIGN(width, alignment);
@@ -1906,6 +1901,9 @@ void GetDRMFormat(uint32_t format, uint32_t flags, uint32_t *drm_format,
       break;*/
     case HAL_PIXEL_FORMAT_YV12:
       *drm_format = DRM_FORMAT_YVU420;
+      break;
+    case HAL_PIXEL_FORMAT_RGBA_FP16:
+      ALOGW("HAL_PIXEL_FORMAT_RGBA_FP16 currently not supported");
       break;
     default:
       ALOGE("Unsupported format %d", format);
