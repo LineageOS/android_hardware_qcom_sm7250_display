@@ -21,8 +21,8 @@ PRODUCT_PACKAGES += \
     vendor.qti.hardware.display.mapper@2.0.vendor \
     vendor.qti.hardware.display.mapper@3.0.vendor \
     vendor.qti.hardware.display.mapper@4.0.vendor \
-    init.qti.display_boot.sh \
-    init.qti.display_boot.rc \
+    #init.qti.display_boot.sh \
+    #init.qti.display_boot.rc \
     modetest
 
 PRODUCT_PROPERTY_OVERRIDES += \
