@@ -100,7 +100,7 @@ void HWCUEvent::UEventThread(HWCUEvent *hwc_uevent) {
   if (!status) {
     std::unique_lock<std::mutex> caller_lock(hwc_uevent->mutex_);
     hwc_uevent->caller_cv_.notify_one();
-    DLOGE("Failed to init uevent with err %d", status);
+    ALOGE("Failed to init uevent with err %d", status);
     return;
   }
 
