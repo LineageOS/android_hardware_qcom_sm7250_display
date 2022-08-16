@@ -9,6 +9,7 @@ endif
 display-hals += gralloc
 display-hals += sde-drm
 display-hals += composer
+display-hals += init
 
 ifneq (,$(call is-vendor-board-qcom))
     include $(call all-named-subdir-makefiles,$(display-hals))
