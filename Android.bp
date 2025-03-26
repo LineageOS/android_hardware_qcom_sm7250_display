@@ -46,7 +46,16 @@ cc_defaults {
         "-Wconversion",
         "-Wall",
         "-Werror",
-    ],
+    ] + select(soong_config_variable("qtidisplay", "gralloc_handle_has_custom_content_md_reserved_size"), {
+        "true": ["-DGRALLOC_HANDLE_HAS_CUSTOM_CONTENT_MD_RESERVED_SIZE"],
+        default: [],
+    }) + select(soong_config_variable("qtidisplay", "gralloc_handle_has_reserved_size"), {
+        "true": ["-DGRALLOC_HANDLE_HAS_RESERVED_SIZE"],
+        default: [],
+    }) + select(soong_config_variable("qtidisplay", "gralloc_handle_has_ubwcp_format"), {
+        "true": ["-DGRALLOC_HANDLE_HAS_UBWCP_FORMAT"],
+        default: [],
+    }),
     shared_libs: [
         "liblog",
         "libcutils",
