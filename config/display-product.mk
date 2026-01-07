@@ -21,7 +21,7 @@ PRODUCT_PACKAGES += \
 
 PRODUCT_PROPERTY_OVERRIDES += \
     persist.sys.sf.color_saturation=1.0 \
-    persist.sys.sf.color_mode=9 \
+    persist.sys.sf.color_mode=0 \
     debug.sf.hw=0 \
     debug.egl.hw=0 \
     debug.mdpcomp.logs=0 \
